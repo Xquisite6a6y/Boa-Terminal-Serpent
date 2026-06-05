@@ -33,7 +33,22 @@ function demonstrateObscurification(input) {
         return;
     }
 
-    // Simulate obscurification by creating a "scrambled" version
+    // Use the BOA protocol layer when it is loaded. The protocol converts
+    // incoming text into a license-shaped command envelope instead of
+    // executing raw input directly.
+    if (window.BoaProtocol && window.BoaDashboardIdentity) {
+        const license = window.BoaProtocol.deriveLicense(
+            window.BoaDashboardIdentity.username,
+            window.BoaDashboardIdentity.password,
+            { plan: window.BoaDashboardIdentity.plan || 'solo' }
+        );
+        const envelope = window.BoaProtocol.translateCommand(input, 'boa', license);
+        obscurifiedElement.textContent = `${envelope.obscured} [${envelope.status}]`;
+        return;
+    }
+
+    // Fallback visual-only obscurification for static demos that do not load
+    // src/boa.js.
     const obscurified = obscurifyText(input);
     obscurifiedElement.textContent = obscurified;
 }
