@@ -1,0 +1,5 @@
+.git
+node_modules
+.boa-state.json
+boa-aws-bundle.zip
+npm-debug.log

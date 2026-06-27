@@ -165,3 +165,43 @@ The storage hierarchy is implemented as `password -> PBKDF2-SHA512 seven-variabl
 keyspace -> seven phase/layer signal lattice -> equations`. Correct-password
 retrieval reconstructs bytes exactly; wrong-password retrieval intentionally
 emits opaque bytes instead of throwing a password error.
+
+## Build and deploy commands
+
+Use these commands before deploying to Amazon Web Services:
+
+```bash
+npm run check
+npm test
+npm run build
+```
+
+Start the app locally or on AWS with:
+
+```bash
+npm start -- --host 0.0.0.0 --port 8787
+```
+
+For AWS Elastic Beanstalk or App Runner source upload, create a bundle with:
+
+```bash
+npm run aws:elasticbeanstalk
+```
+
+For container hosting on ECS, App Runner, or Lightsail:
+
+```bash
+docker build -t boa-terminal-serpent .
+docker run --rm -p 8787:8787 -e BOA_BASE_URL=http://localhost:8787 boa-terminal-serpent
+```
+
+See `DEPLOY_AWS.md` for runtime environment variables and deployment notes.
+
+## Interactive sandbox on the main page
+
+The dashboard home page includes a BOA sandbox where visitors can submit normal
+intents or hostile-looking shell injections. The sandbox never executes the
+input. It derives a demonstration BOA password language, translates safe intents,
+quarantines hostile patterns, produces a signed obscured envelope, shows the
+phase-stack compression snapshot, and emits the six-variable cast equation used
+for low-bandwidth intent casting demos.

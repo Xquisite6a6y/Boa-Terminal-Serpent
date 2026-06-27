@@ -373,6 +373,52 @@ function solveTransferEquation(equation, license) {
   return JSON.parse(encoded);
 }
 
+function runSandboxScenario(input, options = {}) {
+  const username = options.username || 'sandbox';
+  const password = options.password || 'sandbox demonstration password';
+  const target = options.target || 'linux';
+  const license = deriveLicense(username, password, { plan: options.plan || 'team' });
+  const translated = translateCommand(input, target, license);
+  const memory = new PhaseStackMemory(license, { phaseWidth: 6 });
+  memory.push({ stage: 'raw-intent', input: String(input || '') });
+  memory.push({ stage: 'boa-envelope', status: translated.status, obscured: translated.obscured });
+  memory.push({ stage: 'adapter-decision', command: translated.command, reason: translated.reason || 'Trusted adapter may dispatch this inert envelope.' });
+  const sixVariableCast = createCastVariables({
+    pointerX: Number(options.pointerX || 0),
+    pointerY: Number(options.pointerY || 0),
+    inputState: translated.intent.verb,
+    frameHash: stableHash(String(input || '')),
+    viewport: options.viewport || 'sandbox',
+    phase: memory.snapshot().headHash,
+  }, license);
+  return Object.freeze({
+    verdict: translated.status === 'quarantined' ? 'quarantined' : 'translated',
+    safetyNote: translated.status === 'quarantined'
+      ? 'The input matched hostile patterns and was converted into an inert BOA quarantine envelope instead of executable code.'
+      : 'The input was normalized into intent, signed, obscured, and wrapped as a solvable BOA equation.',
+    translated,
+    memory: memory.snapshot(),
+    sixVariableCast,
+  });
+}
+
+function createCastVariables(frame, license) {
+  const variables = {
+    intent: String(frame.inputState || 'idle'),
+    x: Number(frame.pointerX || 0),
+    y: Number(frame.pointerY || 0),
+    viewport: String(frame.viewport || 'main'),
+    frameHash: String(frame.frameHash || stableHash(JSON.stringify(frame))),
+    phase: String(frame.phase || license.privacyScope),
+  };
+  return Object.freeze({
+    mode: 'boa-six-variable-cast-v1',
+    variables: Object.freeze(variables),
+    equation: createTransferEquation(variables, license, { kind: 'cast' }),
+    signature: signPayload(license, JSON.stringify(variables), 'cast'),
+  });
+}
+
 class PhaseStackMemory {
   constructor(license, options = {}) {
     this.license = license;
@@ -602,6 +648,7 @@ const BoaProtocol = Object.freeze({
   Workspace,
   buildDialectCommand,
   compareVisibility,
+  createCastVariables,
   createMaintainerPolicy,
   createTransferEquation,
   createUnifiedNode,
@@ -612,6 +659,7 @@ const BoaProtocol = Object.freeze({
   normalizeIntent,
   obscureForLicense,
   resolveDialect,
+  runSandboxScenario,
   signPayload,
   solveTransferEquation,
   stableHash,
