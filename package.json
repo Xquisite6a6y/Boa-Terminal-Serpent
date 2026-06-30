@@ -1,27 +1,8 @@
 {
   "name": "boa-terminal-serpent",
-  "version": "0.1.0",
-  "private": true,
-  "bin": {
-    "boa-daemon": "boa-daemon.js",
-    "boa-node": "bin/boa-node.js"
-  },
+  "version": "1.0.0",
+  "main": "boa-api-server.js",
   "scripts": {
-    "test": "node test/boa.test.js",
-    "check": "node --check boa-daemon.js && node --check src/boa.js && node --check src/boa_site.js && node --check bin/boa-node.js && node --check test/boa.test.js",
-    "pkg:linux": "pkg boa-daemon.js --targets node20-linux-x64 --output dist/boa-daemon-linux",
-    "pkg:macos": "pkg boa-daemon.js --targets node20-macos-x64 --output dist/boa-daemon-macos",
-    "pkg:windows": "pkg boa-daemon.js --targets node20-win-x64 --output dist/boa-daemon-windows.exe"
-  },
-  "pkg": {
-    "scripts": [
-      "boa-daemon.js"
-    ],
-    "targets": [
-      "node20-linux-x64",
-      "node20-macos-x64",
-      "node20-win-x64"
-    ],
-    "outputPath": "dist"
+    "start": "node boa-api-server.js"
   }
 }
