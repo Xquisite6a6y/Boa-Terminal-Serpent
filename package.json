@@ -12,9 +12,9 @@
     "pkg:linux": "pkg boa-daemon.js --targets node20-linux-x64 --output dist/boa-daemon-linux",
     "pkg:macos": "pkg boa-daemon.js --targets node20-macos-x64 --output dist/boa-daemon-macos",
     "pkg:windows": "pkg boa-daemon.js --targets node20-win-x64 --output dist/boa-daemon-windows.exe",
-    "start": "node bin/boa-node.js serve --host 0.0.0.0",
+    "start": "node bin/boa-node.js serve --host 0.0.0.0 --port ${PORT:-8787}",
     "build": "npm run check && npm test",
-    "aws:elasticbeanstalk": "npm run build && zip -r boa-aws-bundle.zip package.json README.md DEPLOY_AWS.md Procfile Dockerfile apprunner.yaml buildspec.yml boa-daemon.js bin src test dist",
+    "aws:elasticbeanstalk": "npm run build && zip -r boa-aws-bundle.zip package.json README.md Procfile Dockerfile boa-daemon.js bin src test dist",
     "aws:health": "node -e \"const http=require('http');const port=process.env.PORT||8787;const s=http.createServer((q,r)=>{r.end('ok')});s.listen(port,()=>{console.log('ok');s.close()})\""
   },
   "pkg": {

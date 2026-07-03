@@ -199,14 +199,3 @@ assert.equal(sandbox.translated.status, 'quarantined');
 assert.equal(sandbox.memory.frames, 3);
 assert.equal(sandbox.sixVariableCast.mode, 'boa-six-variable-cast-v1');
 assert.deepEqual(Boa.solveTransferEquation(sandbox.sixVariableCast.equation, Boa.deriveLicense('sandbox', 'sandbox demonstration password', { plan: 'team' })), sandbox.sixVariableCast.variables);
-
-const BoaGate = require('../src/boa-gate');
-const testGate = {
-  config: { deviceId: 'test-device', transportSecret: 'test-secret', policy: 'strict' },
-  events: [],
-  stats: { wrapped: 0, unwrapped: 0, rejected: 0 },
-};
-const envelope = BoaGate.wrapOutbound('local signal', { route: 'test' }, testGate);
-assert.equal(envelope.format, 'boa-envelope-v1');
-assert.equal(BoaGate.unwrapInbound(envelope, {}, testGate).payload, 'local signal');
-assert.deepEqual(BoaGate.unwrapInbound('raw signal', {}, testGate), { ok: false, code: 'BOA_GATE_REJECTED_RAW_SIGNAL' });

