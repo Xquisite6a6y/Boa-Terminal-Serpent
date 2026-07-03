@@ -7,6 +7,7 @@ const http = require('http');
 const https = require('https');
 const os = require('os');
 const path = require('path');
+const BoaGate = require('./src/boa-gate');
 
 const SIGNAL_FORMAT = 'boa-signal-v1';
 const TEXT_PREFIX = 'BOA-EQ1:';
@@ -249,6 +250,7 @@ function postJson(endpoint, pathname, payload) {
 }
 
 function heartbeatPayload(config) {
+  const gate = BoaGate.gateStatus();
   return {
     deviceToken: config.deviceToken,
     deviceId: config.deviceId,
@@ -258,6 +260,10 @@ function heartbeatPayload(config) {
     memory: { total: os.totalmem(), free: os.freemem() },
     cpus: os.cpus().length,
     sealed: process.env.BOA_SEALED_MODE === '1',
+    signalStatus: gate.signalStatus,
+    wrappedCount: gate.wrappedCount,
+    unwrappedCount: gate.unwrappedCount,
+    activeRoutes: gate.activeRoutes,
   };
 }
 
@@ -268,11 +274,17 @@ async function heartbeat() {
 }
 
 function usage() {
-  return `BOA daemon CLI\n\nCommands:\n  node boa-daemon.js store <filePath> <password> [outputPath]\n  node boa-daemon.js retrieve <storedPath> <password> [outputPath]\n  node boa-daemon.js obscure <text> <password>\n  node boa-daemon.js deobscure <obscuredText> <password>\n  node boa-daemon.js phase <storedPath> <password>\n  node boa-daemon.js seal [outputPath]\n  node boa-daemon.js daemon\n  node boa-daemon.js heartbeat\n`;
+  return `BOA daemon developer mode\n\nNormal users start BOA from the website installer. Maintainer commands:\n  node boa-daemon.js gate\n  node boa-daemon.js proxy --port 8788\n  node boa-daemon.js daemon\n  node boa-daemon.js heartbeat\n  node boa-daemon.js store <filePath> <password> [outputPath]\n  node boa-daemon.js retrieve <storedPath> <password> [outputPath]\n  node boa-daemon.js obscure <text> <password>\n  node boa-daemon.js deobscure <obscuredText> <password>\n  node boa-daemon.js phase <storedPath> <password>\n  node boa-daemon.js seal [outputPath]\n`;
 }
 
 async function main(argv = process.argv.slice(2)) {
   const [command, first, second, third] = argv;
+  const readFlag = (name, fallback) => {
+    const inline = argv.find((arg) => arg.startsWith(`--${name}=`));
+    if (inline) return inline.slice(name.length + 3);
+    const index = argv.indexOf(`--${name}`);
+    return index === -1 ? fallback : argv[index + 1];
+  };
   if (!command || command === 'help' || command === '--help') {
     console.log(usage());
   } else if (command === 'store') {
@@ -289,9 +301,21 @@ async function main(argv = process.argv.slice(2)) {
     console.log(JSON.stringify({ sealedPath: sealSource(__filename, first || third) }, null, 2));
   } else if (command === 'heartbeat') {
     console.log(JSON.stringify(await heartbeat(), null, 2));
+  } else if (command === 'gate' || command === 'proxy') {
+    const gate = await BoaGate.startGate({
+      port: Number(readFlag('port', process.env.BOA_GATE_PORT || 8788)),
+      policy: readFlag('policy', process.env.BOA_GATE_POLICY || 'protected'),
+      target: readFlag('target', process.env.BOA_GATE_TARGET),
+    });
+    console.log(JSON.stringify(BoaGate.gateStatus(gate), null, 2));
   } else if (command === 'daemon') {
-    console.log(JSON.stringify(await heartbeat(), null, 2));
-    setInterval(() => heartbeat().catch((error) => console.error(error.message)), 30000);
+    const gate = await BoaGate.startGate({
+      port: Number(readFlag('port', process.env.BOA_GATE_PORT || 8788)),
+      policy: readFlag('policy', process.env.BOA_GATE_POLICY || 'protected'),
+    });
+    console.log(JSON.stringify(BoaGate.gateStatus(gate), null, 2));
+    heartbeat().then((result) => console.log(JSON.stringify(result, null, 2))).catch((error) => console.error(`Dashboard heartbeat skipped: ${error.message}`));
+    setInterval(() => heartbeat().catch((error) => console.error(`Dashboard heartbeat skipped: ${error.message}`)), 30000);
   } else {
     throw new Error(`Unknown command: ${command}`);
   }
@@ -315,4 +339,5 @@ module.exports = {
   retrieveFile,
   sealSource,
   storeFile,
+  gate: BoaGate,
 };
