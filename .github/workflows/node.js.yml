@@ -10,30 +10,7 @@ on:
     branches: [ "main" ]
 
 jobs:
-  generate-lockfile:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-    - name: Use Node.js
-      uses: actions/setup-node@v4
-      with:
-        node-version: 18.x
-    - name: Generate package-lock.json
-      run: npm install --package-lock-only
-    - name: Commit lock file
-      run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
-        if git diff --quiet package-lock.json; then
-          echo "Lock file already up to date"
-        else
-          git add package-lock.json
-          git commit -m "chore: update package-lock.json" || true
-          git push
-        fi
-
   build:
-    needs: generate-lockfile
     runs-on: ubuntu-latest
 
     strategy:
