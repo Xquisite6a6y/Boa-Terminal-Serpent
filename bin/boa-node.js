@@ -68,7 +68,7 @@ function commandWrap() {
 }
 
 async function commandServe() {
-  const port = Number(readArg('port', process.env.BOA_SITE_PORT || 8787));
+  const port = Number(readArg('port', process.env.PORT || process.env.BOA_SITE_PORT || 8787));
   const host = readArg('host', process.env.BOA_SITE_HOST || '127.0.0.1');
   const statePath = readArg('state', process.env.BOA_STATE_PATH || '.boa-state.json');
   const baseUrl = readArg('base-url', process.env.BOA_BASE_URL || `http://${host}:${port}`);

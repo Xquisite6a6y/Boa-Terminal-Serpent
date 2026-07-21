@@ -20,6 +20,283 @@ const PLAN_LIMITS = Object.freeze({
   enterprise: Object.freeze({ devices: 64, handshakes: true, workspaces: 64, resourceShare: true }),
 });
 
+
+const PER_DEVICE_PRICING = Object.freeze({
+  freeSecurityDevices: 1,
+  includedPaidDevices: 3,
+  monthlyBaseUsd: 4,
+  monthlyPerExtraDeviceUsd: 2,
+  annualDiscount: 0.17,
+  freeIncludes: Object.freeze(['daemon security', 'local BOA gate', 'one protected device', 'sandbox demo']),
+});
+
+function estimatePerDevicePricing(deviceCount = 1, options = {}) {
+  const devices = Math.max(1, Math.floor(Number(deviceCount) || 1));
+  const base = Number(options.monthlyBaseUsd || PER_DEVICE_PRICING.monthlyBaseUsd);
+  const perExtra = Number(options.monthlyPerExtraDeviceUsd || PER_DEVICE_PRICING.monthlyPerExtraDeviceUsd);
+  const included = Number(options.includedPaidDevices || PER_DEVICE_PRICING.includedPaidDevices);
+  if (devices <= PER_DEVICE_PRICING.freeSecurityDevices) {
+    return Object.freeze({
+      model: 'free-security-per-device-connectivity',
+      devices,
+      monthlyUsd: 0,
+      annualUsd: 0,
+      freeSecurity: true,
+      explanation: 'Daemon security stays free for the first protected device; paid value starts when users connect more devices.',
+    });
+  }
+  const extraDevices = Math.max(0, devices - included);
+  const efficiency = options.efficiency || calculateUnifiedEfficiency({ connectedDevices: devices, stackedEntries: options.stackedEntries || 0, reuse: options.reuse || 1 });
+  const efficiencyPremium = Math.max(0, Math.ceil((efficiency.efficiencyMultiplier - 1) * 2));
+  const monthlyUsd = Number((base + extraDevices * perExtra + efficiencyPremium).toFixed(2));
+  const annualUsd = Number((monthlyUsd * 12 * (1 - PER_DEVICE_PRICING.annualDiscount)).toFixed(2));
+  return Object.freeze({
+    model: 'free-security-per-device-connectivity',
+    devices,
+    includedPaidDevices: included,
+    extraDevices,
+    monthlyBaseUsd: base,
+    monthlyPerExtraDeviceUsd: perExtra,
+    efficiencyMultiplier: efficiency.efficiencyMultiplier,
+    efficiencyPremiumUsd: efficiencyPremium,
+    monthlyUsd,
+    annualUsd,
+    freeSecurity: true,
+    explanation: 'Users pay for connected devices, cloud relay, mesh routing, casting, and resource sharing—not for base daemon security.',
+  });
+}
+
+function seededUnit(seed, index) {
+  const value = parseInt(stableHash(`${seed}:unit:${index}`).slice(0, 8), 16) / 0xffffffff;
+  return value * 2 - 1;
+}
+
+function buildPhasePermutation(seed, size) {
+  const order = Array.from({ length: size }, (_, index) => index);
+  for (let index = size - 1; index > 0; index -= 1) {
+    const swap = seededNumber(seed, `perm:${index}`) % (index + 1);
+    const current = order[index];
+    order[index] = order[swap];
+    order[swap] = current;
+  }
+  return order;
+}
+
+function phaseEncodeVector(vector, keySeed, phase) {
+  const seed = String(keySeed || 'boa-phase-key');
+  const permutation = buildPhasePermutation(seed, vector.length);
+  return permutation.map((sourceIndex, outputIndex) => {
+    const angle = phase * ((outputIndex % 7) + 1);
+    const sign = seededNumber(seed, `sign:${outputIndex}`) % 2 === 0 ? 1 : -1;
+    return Number((vector[sourceIndex] * sign * Math.cos(angle)).toFixed(12));
+  });
+}
+
+function phaseDecodeVector(encoded, keySeed, phase) {
+  const seed = String(keySeed || 'boa-phase-key');
+  const permutation = buildPhasePermutation(seed, encoded.length);
+  const output = Array.from({ length: encoded.length }, () => 0);
+  permutation.forEach((sourceIndex, outputIndex) => {
+    const angle = phase * ((outputIndex % 7) + 1);
+    const sign = seededNumber(seed, `sign:${outputIndex}`) % 2 === 0 ? 1 : -1;
+    const scale = Math.cos(angle) || 1e-9;
+    output[sourceIndex] = Number((encoded[outputIndex] / sign / scale).toFixed(12));
+  });
+  return output;
+}
+
+function meanSquaredError(a, b) {
+  const length = Math.min(a.length, b.length);
+  return a.slice(0, length).reduce((sum, value, index) => sum + ((value - b[index]) ** 2), 0) / Math.max(1, length);
+}
+
+function simulatePhaseLattice(options = {}) {
+  const size = Math.max(8, Math.min(1024, Number(options.size || 128)));
+  const phases = Math.max(2, Math.min(128, Number(options.phases || 32)));
+  const layers = Math.max(2, Math.min(128, Number(options.layers || 16)));
+  const steps = Math.max(1, Math.min(365, Number(options.steps || 90)));
+  const keySeed = options.keySeed || 'boa-user-language';
+  const wrongKeySeed = options.wrongKeySeed || 'wrong-language';
+  const phase = Number(options.phase || Math.PI / 3);
+  const vector = Array.from({ length: size }, (_, index) => Number(seededUnit('boa-phase-data', index).toFixed(12)));
+  const encoded = phaseEncodeVector(vector, keySeed, phase);
+  const decodedCorrect = phaseDecodeVector(encoded, keySeed, phase);
+  const decodedWrong = phaseDecodeVector(encoded, wrongKeySeed, phase);
+  const correctMse = meanSquaredError(vector, decodedCorrect);
+  const wrongMse = meanSquaredError(vector, decodedWrong);
+
+  let compressionFactor = 1;
+  let logicalStorage = 0;
+  let rawWork = 0;
+  let actualWork = 0;
+  const snapshots = [];
+  for (let step = 0; step < steps; step += 1) {
+    const installSize = 50 + Math.abs(seededUnit(keySeed, `install:${step}`)) * 450;
+    const redundancy = 1 + (seededNumber(keySeed, `category:${step}`) % phases) / phases;
+    logicalStorage += installSize;
+    rawWork += installSize;
+    const pressure = Math.min(1, installSize / (logicalStorage + 1));
+    const interaction = Math.log(redundancy + 1);
+    const saturation = 1 + (compressionFactor / 100000) ** 1.2;
+    compressionFactor += (0.015 * interaction * (compressionFactor ** 1.15) * (1 + pressure)) / saturation;
+    compressionFactor -= Math.log(compressionFactor + 1) / 60;
+    if (compressionFactor < 1) compressionFactor = 1;
+    actualWork += installSize / compressionFactor;
+    if (step % Math.max(1, Math.floor(steps / 6)) === 0 || step === steps - 1) {
+      snapshots.push(Object.freeze({
+        step,
+        logicalStorageMb: Number(logicalStorage.toFixed(2)),
+        simulatedCompressedMb: Number((logicalStorage / compressionFactor).toFixed(2)),
+        compressionFactor: Number(compressionFactor.toFixed(4)),
+      }));
+    }
+  }
+
+  return Object.freeze({
+    mode: 'boa-phase-lattice-simulation-v1',
+    safetyNote: 'Simulation only: this demonstrates password/phase isolation and dedupe-style efficiency modeling. It does not claim to physically create CPU, RAM, or storage capacity.',
+    dimensions: Object.freeze({ size, phases, layers, steps }),
+    recovery: Object.freeze({
+      correctKeyMse: Number(correctMse.toExponential(6)),
+      wrongKeyMse: Number(wrongMse.toExponential(6)),
+      wrongKeyLooksLikeGarbage: wrongMse > 0.01,
+    }),
+    compression: Object.freeze({
+      logicalStorageMb: Number(logicalStorage.toFixed(2)),
+      simulatedCompressedMb: Number((logicalStorage / compressionFactor).toFixed(2)),
+      compressionFactor: Number(compressionFactor.toFixed(4)),
+      rawWork: Number(rawWork.toFixed(2)),
+      actualWork: Number(actualWork.toFixed(2)),
+      efficiencyGain: Number((rawWork / Math.max(actualWork, 1e-9)).toFixed(4)),
+      snapshots: Object.freeze(snapshots),
+    }),
+    pricing: estimatePerDevicePricing(Number(options.devices || 5)),
+  });
+}
+
+
+function coordinateKey(coordinate) {
+  return `${coordinate.x}:${coordinate.y}:${coordinate.z}`;
+}
+
+class PhaseCoordinateStack {
+  constructor(ownerLicense, options = {}) {
+    this.owner = ownerLicense;
+    this.gridSize = Math.max(2, Math.min(256, Number(options.gridSize || 16)));
+    this.maxDepth = Math.max(1, Math.min(128, Number(options.maxDepth || ownerLicense.passwordLanguage.phaseWidth || 8)));
+    this.cells = new Map();
+    this.entries = new Map();
+  }
+
+  coordinateFor(id) {
+    const seed = `${this.owner.privacyScope}:${id}`;
+    return Object.freeze({
+      x: seededNumber(seed, 'x') % this.gridSize,
+      y: seededNumber(seed, 'y') % this.gridSize,
+      z: seededNumber(seed, 'z') % this.gridSize,
+    });
+  }
+
+  equationFor(coordinate, depth) {
+    const variable = this.owner.passwordLanguage.layerVariables[depth % this.owner.passwordLanguage.layerVariables.length];
+    const value = (coordinate.x * variable.multiplier + coordinate.y * variable.fold + coordinate.z + variable.offset + depth) % this.gridSize;
+    return `L${depth}:(${coordinate.x}*${variable.multiplier}+${coordinate.y}*${variable.fold}+${coordinate.z}+${variable.offset}+${depth}) mod ${this.gridSize}=${value}`;
+  }
+
+  store(id, payload, metadata = {}) {
+    const entryId = String(id || `entry-${this.entries.size + 1}`);
+    const coordinate = this.coordinateFor(entryId);
+    const depth = (seededNumber(`${this.owner.privacyScope}:${entryId}`, 'depth') % this.maxDepth) + 1;
+    const equationPath = Array.from({ length: depth }, (_, layer) => this.equationFor(coordinate, layer));
+    const encoded = createTransferEquation(payload, this.owner, { kind: metadata.kind || 'phase-stack-entry', coordinate, depth });
+    const record = Object.freeze({
+      id: entryId,
+      coordinate,
+      depth,
+      equationPath: Object.freeze(equationPath),
+      encoded,
+      metadata: Object.freeze({ ...metadata, storedAt: new Date().toISOString() }),
+      byteLength: encodeValue(payload).length,
+    });
+    const key = coordinateKey(coordinate);
+    const cell = this.cells.get(key) || [];
+    cell[depth] = record;
+    this.cells.set(key, cell);
+    this.entries.set(entryId, record);
+    return record;
+  }
+
+  isolate(locator) {
+    const coordinate = locator.coordinate || locator;
+    const depth = Number(locator.depth || 0);
+    const cell = this.cells.get(coordinateKey(coordinate));
+    if (!cell || !cell[depth]) throw new Error('No BOA phase-stack entry exists at that coordinate/depth.');
+    const record = cell[depth];
+    const expected = record.equationPath.join('|');
+    const actual = (locator.equationPath || record.equationPath).join('|');
+    if (expected !== actual) throw new Error('Equation path mismatch; this BOA language cannot bring the entry forward.');
+    return record;
+  }
+
+  bringForward(locator, readerLicense = this.owner) {
+    const record = this.isolate(locator);
+    return solveTransferEquation(record.encoded, readerLicense);
+  }
+
+  snapshot(connectedDevices = 1) {
+    const entries = [...this.entries.values()];
+    const logicalBytes = entries.reduce((sum, entry) => sum + entry.byteLength, 0);
+    const uniqueCoordinates = new Set(entries.map((entry) => coordinateKey(entry.coordinate))).size;
+    const reuse = entries.length / Math.max(1, uniqueCoordinates);
+    const unifiedEfficiency = calculateUnifiedEfficiency({ connectedDevices, stackedEntries: entries.length, reuse });
+    return Object.freeze({
+      mode: 'boa-3d-phase-coordinate-stack-v1',
+      gridSize: this.gridSize,
+      maxDepth: this.maxDepth,
+      entries: entries.length,
+      uniqueCoordinates,
+      logicalBytes,
+      reuse: Number(reuse.toFixed(4)),
+      unifiedEfficiency,
+    });
+  }
+}
+
+function calculateUnifiedEfficiency(options = {}) {
+  const connectedDevices = Math.max(1, Math.floor(Number(options.connectedDevices || options.devices || 1)));
+  const stackedEntries = Math.max(0, Math.floor(Number(options.stackedEntries || 0)));
+  const reuse = Math.max(1, Number(options.reuse || 1));
+  const deviceMeshGain = Math.log2(connectedDevices + 1) / 4;
+  const stackGain = Math.log(stackedEntries + 1) / 12;
+  const reuseGain = Math.log(reuse + 1) / 8;
+  const efficiencyMultiplier = Number((1 + deviceMeshGain + stackGain + reuseGain).toFixed(4));
+  return Object.freeze({
+    connectedDevices,
+    stackedEntries,
+    reuse: Number(reuse.toFixed(4)),
+    efficiencyMultiplier,
+    pricingSignal: Number((connectedDevices * efficiencyMultiplier).toFixed(4)),
+    note: 'Modeled efficiency from unified-device sharing and phase-stack reuse; real gains depend on adapters, workloads, and OS permissions.',
+  });
+}
+
+function runPhaseStackDemo(options = {}) {
+  const license = deriveLicense(options.username || 'phase-user', options.password || 'phase stack password', { plan: options.plan || 'team' });
+  const stack = new PhaseCoordinateStack(license, { gridSize: options.gridSize || 12, maxDepth: options.maxDepth || 9 });
+  const payload = options.payload || { fileName: 'demo.txt', body: 'BOA brings this exact payload forward from a 3D coordinate.' };
+  const stored = stack.store(options.id || 'demo-file', payload, { kind: 'file' });
+  const recovered = stack.bringForward(stored, license);
+  const snapshot = stack.snapshot(options.devices || 5);
+  return Object.freeze({
+    ok: true,
+    mode: 'boa-phase-stack-demo-v1',
+    stored,
+    recovered,
+    matches: encodeValue(recovered) === encodeValue(payload),
+    snapshot,
+  });
+}
+
 const DEFAULT_DIALECTS = Object.freeze({
   posix: Object.freeze({
     name: 'POSIX Shell',
@@ -373,6 +650,52 @@ function solveTransferEquation(equation, license) {
   return JSON.parse(encoded);
 }
 
+function runSandboxScenario(input, options = {}) {
+  const username = options.username || 'sandbox';
+  const password = options.password || 'sandbox demonstration password';
+  const target = options.target || 'linux';
+  const license = deriveLicense(username, password, { plan: options.plan || 'team' });
+  const translated = translateCommand(input, target, license);
+  const memory = new PhaseStackMemory(license, { phaseWidth: 6 });
+  memory.push({ stage: 'raw-intent', input: String(input || '') });
+  memory.push({ stage: 'boa-envelope', status: translated.status, obscured: translated.obscured });
+  memory.push({ stage: 'adapter-decision', command: translated.command, reason: translated.reason || 'Trusted adapter may dispatch this inert envelope.' });
+  const sixVariableCast = createCastVariables({
+    pointerX: Number(options.pointerX || 0),
+    pointerY: Number(options.pointerY || 0),
+    inputState: translated.intent.verb,
+    frameHash: stableHash(String(input || '')),
+    viewport: options.viewport || 'sandbox',
+    phase: memory.snapshot().headHash,
+  }, license);
+  return Object.freeze({
+    verdict: translated.status === 'quarantined' ? 'quarantined' : 'translated',
+    safetyNote: translated.status === 'quarantined'
+      ? 'The input matched hostile patterns and was converted into an inert BOA quarantine envelope instead of executable code.'
+      : 'The input was normalized into intent, signed, obscured, and wrapped as a solvable BOA equation.',
+    translated,
+    memory: memory.snapshot(),
+    sixVariableCast,
+  });
+}
+
+function createCastVariables(frame, license) {
+  const variables = {
+    intent: String(frame.inputState || 'idle'),
+    x: Number(frame.pointerX || 0),
+    y: Number(frame.pointerY || 0),
+    viewport: String(frame.viewport || 'main'),
+    frameHash: String(frame.frameHash || stableHash(JSON.stringify(frame))),
+    phase: String(frame.phase || license.privacyScope),
+  };
+  return Object.freeze({
+    mode: 'boa-six-variable-cast-v1',
+    variables: Object.freeze(variables),
+    equation: createTransferEquation(variables, license, { kind: 'cast' }),
+    signature: signPayload(license, JSON.stringify(variables), 'cast'),
+  });
+}
+
 class PhaseStackMemory {
   constructor(license, options = {}) {
     this.license = license;
@@ -596,13 +919,18 @@ const BoaProtocol = Object.freeze({
   DEFAULT_DIALECTS,
   DEFAULT_HEARTBEAT_URL,
   PLAN_LIMITS,
+  PER_DEVICE_PRICING,
+  PhaseCoordinateStack,
   DeviceMesh,
   HandshakeBroker,
   PhaseStackMemory,
   Workspace,
   buildDialectCommand,
   compareVisibility,
+  createCastVariables,
   createMaintainerPolicy,
+  estimatePerDevicePricing,
+  calculateUnifiedEfficiency,
   createTransferEquation,
   createUnifiedNode,
   deriveLicense,
@@ -612,6 +940,9 @@ const BoaProtocol = Object.freeze({
   normalizeIntent,
   obscureForLicense,
   resolveDialect,
+  runSandboxScenario,
+  runPhaseStackDemo,
+  simulatePhaseLattice,
   signPayload,
   solveTransferEquation,
   stableHash,

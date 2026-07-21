@@ -1,0 +1,44 @@
+{
+  "name": "BOA + Aletheia coexistence bridge",
+  "version": "0.1.0",
+  "updatedAt": "2026-07-07",
+  "mode": "namespaced-coexistence",
+  "repositories": [
+    {
+      "name": "Boa-Terminal-Serpent",
+      "url": "https://github.com/Xquisite6a6y/Boa-Terminal-Serpent",
+      "branch": "work",
+      "role": "BOA Core daemon, dashboard, local gate, billing, deployment host"
+    },
+    {
+      "name": "AeonUnifiedAletheia_FullFeatured",
+      "url": "https://github.com/Xquisite6a6y/AeonUnifiedAletheia_FullFeatured",
+      "branch": "master",
+      "commit": "8b0c70555cf93f84357e1604e08fbeca11ff5192",
+      "role": "Aletheia agentic intelligence, reverse-solve workspace, materializer, evolution engine"
+    },
+    {
+      "name": "MyAletheia222069",
+      "url": "https://github.com/Xquisite6a6y/MyAletheia222069",
+      "branch": "main",
+      "commit": "d7f00ae77ba5cf10c77741823a7a9abc8595db52",
+      "role": "Aletheia ethics, marketplace, and 222069 identity foundation"
+    }
+  ],
+  "boundaries": {
+    "boa": "Pure Node.js MVP remains deployable on AWS App Runner, EC2, Lightsail, Elastic Beanstalk, and simple Node hosts.",
+    "aletheia": "External TypeScript/Vite/pnpm projects remain separate runtimes until intentionally vendored or deployed beside BOA.",
+    "secrets": "No tokens, Stripe keys, server passwords, private URLs, or deployment credentials are copied into this repository."
+  },
+  "capabilities": [
+    "closure-first reverse solve",
+    "Omega closure operator",
+    "dual-alpha propagation split",
+    "mu-field mismatch tracking",
+    "agentic materialization pipeline",
+    "ethical marketplace context",
+    "BOA envelope routing",
+    "dashboard-observable integration status",
+    "cybersecurity builder plan"
+  ]
+}

@@ -1,0 +1,80 @@
+name: BOA CI
+
+on:
+  push:
+    branches:
+      - main
+      - work
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-test-build:
+    name: Check, test, build, and smoke
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run static checks
+        run: npm run check
+
+      - name: Run tests
+        run: npm test
+
+      - name: Run build
+        run: npm run build
+
+      - name: Smoke test web server health endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp_state="$(mktemp)"
+          PORT=8787 BOA_STATE_PATH="$tmp_state" BOA_BASE_URL=http://127.0.0.1:8787 npm start > /tmp/boa-ci-server.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" 2>/dev/null || true; rm -f "$tmp_state"' EXIT
+          for attempt in $(seq 1 20); do
+            if curl -fsS http://127.0.0.1:8787/health >/tmp/boa-health.json && curl -fsS http://127.0.0.1:8787/app >/tmp/boa-app.html && curl -fsS http://127.0.0.1:8787/api/public-config >/tmp/boa-config.json; then
+              node -e "const fs=require('fs'); const h=JSON.parse(fs.readFileSync('/tmp/boa-health.json')); const c=JSON.parse(fs.readFileSync('/tmp/boa-config.json')); const html=fs.readFileSync('/tmp/boa-app.html','utf8'); if(!h.staticUi) throw new Error('static UI missing'); if(c.deploymentDecision.target.indexOf('AWS App Runner')===-1) throw new Error('bad target'); if(!html.includes('BOA Unified Control Center')) throw new Error('app shell missing');"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/boa-ci-server.log
+          exit 1
+
+  aws-bundle:
+    name: Build AWS deployment bundle
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    needs: check-test-build
+    if: github.event_name == 'workflow_dispatch' || github.ref == 'refs/heads/main'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Create Elastic Beanstalk bundle
+        run: npm run aws:elasticbeanstalk
+
+      - name: Upload AWS bundle artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: boa-aws-bundle
+          path: boa-aws-bundle.zip
+          if-no-files-found: error

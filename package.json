@@ -8,10 +8,17 @@
   },
   "scripts": {
     "test": "node test/boa.test.js",
-    "check": "node --check boa-daemon.js && node --check src/boa.js && node --check src/boa_site.js && node --check bin/boa-node.js && node --check test/boa.test.js",
+    "check": "node --check boa-daemon.js && node --check src/boa.js && node --check src/boa-gate.js && node --check src/aletheia_bridge.js && node --check src/boa_site.js && node --check bin/boa-node.js && node --check scripts/aws-apprunner-preflight.js && node --check scripts/aws-apprunner-deploy.js && node --check scripts/prepare-production.js && node --check public/assets/app.js && node --check test/boa.test.js",
     "pkg:linux": "pkg boa-daemon.js --targets node20-linux-x64 --output dist/boa-daemon-linux",
     "pkg:macos": "pkg boa-daemon.js --targets node20-macos-x64 --output dist/boa-daemon-macos",
-    "pkg:windows": "pkg boa-daemon.js --targets node20-win-x64 --output dist/boa-daemon-windows.exe"
+    "pkg:windows": "pkg boa-daemon.js --targets node20-win-x64 --output dist/boa-daemon-windows.exe",
+    "start": "node bin/boa-node.js serve --host 0.0.0.0",
+    "build": "npm run check && npm test && npm run prepare:production",
+    "aws:preflight": "node scripts/aws-apprunner-preflight.js",
+    "aws:deploy:apprunner": "node scripts/aws-apprunner-deploy.js",
+    "aws:elasticbeanstalk": "npm run build && zip -r boa-aws-bundle.zip package.json README.md DEPLOY_AWS.md BOA_ARCHITECTURE.md AWS_DEPLOYMENT_DECISION.md PRODUCTION_AUDIT.md Procfile Dockerfile apprunner.yaml buildspec.yml boa-daemon.js bin scripts src public integrations test dist",
+    "aws:health": "node -e \"const http=require('http');const port=process.env.PORT||8787;const s=http.createServer((q,r)=>{r.end('ok')});s.listen(port,()=>{console.log('ok');s.close()})\"",
+    "prepare:production": "node scripts/prepare-production.js"
   },
   "pkg": {
     "scripts": [

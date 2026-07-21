@@ -1,0 +1,42 @@
+{
+  "name": "BOA Unified Aletheia Workspace",
+  "version": "0.2.0",
+  "mode": "local-monorepo-boundary",
+  "rootApp": "Boa-Terminal-Serpent",
+  "modules": [
+    {
+      "id": "boa-core",
+      "name": "BOA Core + Dashboard",
+      "path": ".",
+      "runtime": "node-commonjs",
+      "start": "npm start",
+      "build": "npm run build",
+      "role": "deployable root, daemon gate, dashboard, installers, billing, AWS workflows"
+    },
+    {
+      "id": "aeon-unified-aletheia",
+      "name": "AeonUnifiedAletheia FullFeatured",
+      "path": "integrations/aletheia/modules/aeon-unified-aletheia",
+      "runtime": "typescript-vite-pnpm",
+      "start": "pnpm dev",
+      "build": "pnpm build",
+      "role": "agentic reverse-solve app, materialization engine, evolution workspace"
+    },
+    {
+      "id": "myaletheia222069",
+      "name": "MyAletheia222069",
+      "path": "integrations/aletheia/modules/myaletheia222069",
+      "runtime": "documentation-foundation",
+      "start": null,
+      "build": null,
+      "role": "ethics, marketplace, reverse-solve and 222069 foundation"
+    }
+  ],
+  "unificationRules": [
+    "BOA remains the root deployable service for AWS App Runner and no-code dashboard access.",
+    "Aletheia modules are local source modules under integrations/aletheia/modules and are not just remote links.",
+    "TypeScript/Vite Aletheia code keeps its own package boundary to avoid breaking BOA's pure Node runtime.",
+    "Secrets, generated platform runtime files, and private deployment scripts are not vendored.",
+    "The runtime bridge exposes module status and reverse-solve cybersecurity plans through BOA routes."
+  ]
+}

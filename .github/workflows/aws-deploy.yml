@@ -1,0 +1,57 @@
+name: BOA AWS Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_deploy:
+        description: Type DEPLOY to start an AWS deployment
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: boa-aws-deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  app-runner-deploy:
+    name: Validate and trigger App Runner deployment
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    if: inputs.confirm_deploy == 'DEPLOY'
+
+    env:
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      APP_RUNNER_SERVICE_ARN: ${{ vars.APP_RUNNER_SERVICE_ARN }}
+      AWS_ROLE_TO_ASSUME: ${{ vars.AWS_ROLE_TO_ASSUME }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate required AWS deployment variables
+        run: npm run aws:preflight -- --skip-aws-cli
+
+      - name: Run BOA checks before AWS deploy
+        run: npm run build
+
+      - name: Configure AWS credentials through GitHub OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_TO_ASSUME }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Trigger App Runner source deployment
+        run: npm run aws:deploy:apprunner
+
+      - name: Deployment handoff note
+        run: |
+          echo "App Runner deployment started. Watch AWS App Runner events/logs for build and runtime status."
