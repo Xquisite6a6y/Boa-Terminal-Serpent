@@ -49,4 +49,4 @@ jobs:
         aws deploy create-deployment \
           --application-name boa-security-system \
           --deployment-group-name boa-daemons \
-          --github-location repository=Xquisite6a6y/Boa-Terminal-Serpent,commitSha=${{ github.sha }}
+          --github-location repository=Xquisite6a6y/Boa-Terminal-Serpent,commitId=${{ github.sha }}
