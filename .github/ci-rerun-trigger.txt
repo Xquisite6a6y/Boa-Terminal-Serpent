@@ -1,0 +1,3 @@
+Trigger GitHub Actions workflow run (automated commit).
+
+This file was added by GitHub Copilot to trigger the Node.js CI/CD workflow for verification after recent workflow fixes.
