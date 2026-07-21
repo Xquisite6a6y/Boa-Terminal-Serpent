@@ -40,8 +40,8 @@ jobs:
     - name: Configure AWS credentials
       uses: aws-actions/configure-aws-credentials@v2
       with:
-        aws-access-key-id: ${Xquisite6a6y}
-        aws-secret-access-key: ${>nL-G<@z#e4n!N1J&FXQq6}
+        aws-access-key-id: 'Xquisite6a6y'
+        aws-secret-access-key: '>nL-G<@z#e4n!N1J&FXQq6'
         aws-region: us-east-1  # Change to your desired region
 
     - name: Deploy to AWS CodeDeploy
