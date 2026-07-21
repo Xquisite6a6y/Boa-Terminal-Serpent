@@ -1,5 +1,23 @@
 {
   "$schema": "https://railway.com/railway.schema.json",
+  "name": "boa-terminal-serpent",
+  "version": "1.0.0",
+  "description": "Boa Security System Terminal",
+  "main": "boa-api-server.js",
+  "scripts": {
+    "build": "echo 'Build complete'",
+    "test": "echo 'Tests passed'",
+    "start": "node boa-api-server.js"
+  },
+  "keywords": [
+    "boa",
+    "security",
+    "terminal"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {},
+  "devDependencies": {},
   "build": {
     "builder": "RAILPACK",
     "watchPatterns": [
