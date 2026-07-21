@@ -1,8 +1,27 @@
 {
-  "name": "boa-terminal-serpent",
-  "version": "1.0.0",
-  "main": "boa-api-server.js",
-  "scripts": {
-    "start": "node boa-api-server.js"
+  "$schema": "https://railway.com/railway.schema.json",
+  "build": {
+    "builder": "RAILPACK",
+    "watchPatterns": [
+      "**"
+    ],
+    "buildEnvironment": "V3"
+  },
+  "deploy": {
+    "runtime": "V2",
+    "numReplicas": 1,
+    "startCommand": "node boa-api-server.js",
+    "overlapSeconds": 0,
+    "drainingSeconds": 0,
+    "sleepApplication": true,
+    "useLegacyStacker": false,
+    "ipv6EgressEnabled": true,
+    "multiRegionConfig": {
+      "sfo": {
+        "numReplicas": 1
+      }
+    },
+    "restartPolicyType": "ON_FAILURE",
+    "restartPolicyMaxRetries": 10
   }
 }
