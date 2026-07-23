@@ -24,10 +24,13 @@ if command -v pm2 &>/dev/null; then
   echo "[start_server] Application started with PM2."
 else
   echo "[start_server] PM2 not found. Starting with Node.js directly..."
-  # Determine entry point
-  ENTRY="server.js"
-  if [ -f "index.js" ]; then ENTRY="index.js"; fi
-  if [ -f "app.js" ]; then ENTRY="app.js"; fi
+  # Determine entry point from package.json "main" field, then common names
+  ENTRY=$(node -e "try{const p=require('./package.json');console.log(p.main||'');}catch(e){}" 2>/dev/null || true)
+  if [ -z "$ENTRY" ] || [ ! -f "$ENTRY" ]; then
+    for f in boa-api-server.js server.js app.js index.js; do
+      if [ -f "$f" ]; then ENTRY="$f"; break; fi
+    done
+  fi
 
   NODE_ENV=production nohup node "$ENTRY" \
     >> "$APP_DIR/logs/app.log" 2>&1 &
