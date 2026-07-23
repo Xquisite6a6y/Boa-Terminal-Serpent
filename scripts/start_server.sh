@@ -4,6 +4,12 @@ set -euo pipefail
 APP_DIR="/var/www/boa-security-system"
 APP_NAME="boa-security-system"
 
+# Load nvm and ensure node/npm/pm2 are on PATH
+export NVM_DIR="/opt/nvm"
+# shellcheck disable=SC1091
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+export PATH="/opt/nvm/versions/node/$(ls /opt/nvm/versions/node/ 2>/dev/null | head -1)/bin:/usr/local/bin:$PATH"
+
 echo "[start_server] Starting application..."
 
 cd "$APP_DIR"

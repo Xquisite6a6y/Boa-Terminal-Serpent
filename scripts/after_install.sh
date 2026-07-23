@@ -3,6 +3,13 @@ set -euo pipefail
 
 APP_DIR="/var/www/boa-security-system"
 
+# Load nvm and ensure node/npm are on PATH
+export NVM_DIR="/opt/nvm"
+# shellcheck disable=SC1091
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+# Fallback: add known node bin paths
+export PATH="/opt/nvm/versions/node/$(ls /opt/nvm/versions/node/ 2>/dev/null | head -1)/bin:/usr/local/bin:$PATH"
+
 echo "[after_install] Starting AfterInstall hook..."
 
 cd "$APP_DIR"
