@@ -17,9 +17,13 @@ else
   pkill -f "node" 2>/dev/null || true
 fi
 
-# Install Node.js if not present (Amazon Linux uses yum/dnf)
-if ! command -v node &>/dev/null; then
-  echo "[before_install] Installing Node.js..."
+# Remove any existing nodesource repo that may have wrong version cached
+rm -f /etc/yum.repos.d/nodesource*.repo
+yum clean all
+
+# Install Node.js 16 (last version compatible with Amazon Linux 2 / glibc 2.26)
+if ! command -v node &>/dev/null || [[ "$(node -e 'process.exit(parseInt(process.version.slice(1)))'  ; echo $?)" != "0" ]]; then
+  echo "[before_install] Installing Node.js 16..."
   curl -fsSL https://rpm.nodesource.com/setup_16.x | bash -
   yum install -y nodejs
 fi
