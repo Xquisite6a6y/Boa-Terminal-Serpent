@@ -17,14 +17,27 @@ else
   pkill -f "node" 2>/dev/null || true
 fi
 
-# Remove any existing Node.js and nodesource repos (nodesource RPM repos are deprecated)
+# Remove any existing Node.js and nodesource repos
 yum remove -y nodejs npm 2>/dev/null || true
 rm -f /etc/yum.repos.d/nodesource*.repo
 yum clean all
 
-# Install Node.js 16 via amazon-linux-extras (native AL2 support, no glibc issues)
-echo "[before_install] Installing Node.js 16 via amazon-linux-extras..."
-amazon-linux-extras install -y nodejs16
+# Install Node.js 16 via nvm (works on any Linux, uses pre-built binaries)
+echo "[before_install] Installing Node.js 16 via nvm..."
+export NVM_DIR="/opt/nvm"
+mkdir -p "$NVM_DIR"
+curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | NVM_DIR="$NVM_DIR" bash
+export NVM_DIR="/opt/nvm"
+# shellcheck disable=SC1091
+[ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+nvm install 16
+nvm use 16
+nvm alias default 16
+
+# Symlink node/npm to /usr/local/bin so they're available system-wide
+ln -sf "$NVM_DIR/versions/node/$(nvm version)/bin/node" /usr/local/bin/node
+ln -sf "$NVM_DIR/versions/node/$(nvm version)/bin/npm" /usr/local/bin/npm
+ln -sf "$NVM_DIR/versions/node/$(nvm version)/bin/npx" /usr/local/bin/npx
 
 echo "[before_install] Node.js version: $(node -v)"
 echo "[before_install] npm version: $(npm -v)"
