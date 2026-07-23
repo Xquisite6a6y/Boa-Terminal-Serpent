@@ -11,12 +11,6 @@ permissions:
     mode: "755"
     type:
       - directory
-  - object: /var/www/boa-security-system
-    owner: ec2-user
-    group: ec2-user
-    mode: "644"
-    type:
-      - file
   - object: /var/www/boa-security-system/scripts
     owner: ec2-user
     group: ec2-user
