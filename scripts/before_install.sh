@@ -17,16 +17,14 @@ else
   pkill -f "node" 2>/dev/null || true
 fi
 
-# Remove any existing Node.js and nodesource repo (Node 18 is incompatible with AL2 glibc 2.26)
-yum remove -y nodejs 2>/dev/null || true
+# Remove any existing Node.js and nodesource repos (nodesource RPM repos are deprecated)
+yum remove -y nodejs npm 2>/dev/null || true
 rm -f /etc/yum.repos.d/nodesource*.repo
 yum clean all
-yum makecache
 
-# Install Node.js 16 (last version compatible with Amazon Linux 2 / glibc 2.26)
-echo "[before_install] Installing Node.js 16..."
-curl -fsSL https://rpm.nodesource.com/setup_16.x | bash -
-yum install -y nodejs
+# Install Node.js 16 via amazon-linux-extras (native AL2 support, no glibc issues)
+echo "[before_install] Installing Node.js 16 via amazon-linux-extras..."
+amazon-linux-extras install -y nodejs16
 
 echo "[before_install] Node.js version: $(node -v)"
 echo "[before_install] npm version: $(npm -v)"
