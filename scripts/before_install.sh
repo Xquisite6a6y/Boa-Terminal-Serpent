@@ -20,7 +20,7 @@ fi
 # Install Node.js if not present (Amazon Linux uses yum/dnf)
 if ! command -v node &>/dev/null; then
   echo "[before_install] Installing Node.js..."
-  curl -fsSL https://rpm.nodesource.com/setup_18.x | bash -
+  curl -fsSL https://rpm.nodesource.com/setup_16.x | bash -
   yum install -y nodejs
 fi
 
