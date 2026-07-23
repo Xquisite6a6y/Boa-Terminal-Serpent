@@ -1,0 +1,16 @@
+version: 0.0
+Resources:
+  - TargetService:
+      Type: AWS::EC2::Instance
+      Properties:
+        Tags:
+          - Key: Name
+            Value: BoaSecuritySystem
+Hooks:
+  - BeforeInstall: "scripts/before_install.sh"
+  - AfterInstall: "scripts/after_install.sh"
+  - ApplicationStart: "scripts/start_server.sh"
+  - ApplicationStop: "scripts/stop_server.sh"
+Files:
+  - source: /
+    destination: /var/www/boa-security-system
